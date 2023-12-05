@@ -5,20 +5,43 @@ import psycopg2
 from psycopg2.extras import execute_values
 import csv
 import sys
-
+from datetime import datetime, timedelta
+import argparse
 
 def download_and_unpack_zip(url, local_zip_path, extract_to_folder):
     print("Rozpoczynanie pobierania pliku ZIP...")
     response = requests.get(url)
     with open(local_zip_path, 'wb') as file:
         file.write(response.content)
-    print("Plik ZIP pobrany. Rozpoczynanie rozpakowywania...")
+    print("Plik ZIP pobrany. Rozpaczynanie rozpakowywania...")
     with zipfile.ZipFile(local_zip_path, 'r') as zip_ref:
         zip_ref.extractall(extract_to_folder)
     print("Rozpakowywanie zakończone.")
 
+def check_if_empty(db_params):
+    conn = psycopg2.connect(
+        dbname=db_params['db_name'],
+        user=db_params['user'],
+        password=db_params['password'],
+        host=db_params['host']
+    )
+    cursor = conn.cursor()
+    cursor.execute("SELECT COUNT(*) FROM reporting_results2020")
+    count = cursor.fetchone()[0]
+    cursor.close()
+    conn.close()
+    return count == 0
 
-def load_data_from_csv(file_path, db_params):
+def get_last_month():
+    today = datetime.today()
+    first = today.replace(day=1)
+    last_month = first - timedelta(days=1)
+    return last_month.strftime("%Y-%m")
+
+def convert_text_to_date(text_date):
+    return datetime.strptime(text_date.split(' ')[0], '%Y-%m-%d')
+
+def load_data_from_csv(file_path, db_params, mode):
     print("Łączenie z bazą danych...")
     conn = psycopg2.connect(
         dbname=db_params['db_name'],
@@ -29,7 +52,6 @@ def load_data_from_csv(file_path, db_params):
     print("Połączenie z bazą danych nawiązane.")
     cursor = conn.cursor()
 
-    # Zwiększ limit rozmiaru pola
     csv.field_size_limit(sys.maxsize)
 
     print("Rozpoczynanie wczytywania danych z CSV...")
@@ -38,11 +60,20 @@ def load_data_from_csv(file_path, db_params):
         next(reader)  # Skip the header
 
         batch = []
+        batch_iterator = 0
+        last_month = get_last_month() if mode == "update" else None
+
         for row in reader:
             if len(row) != 26 or any(len(value) > 131071 for value in row):
                 continue  # Pomijanie wierszy z błędnymi danymi
 
+            if mode == "update":
+                record_date = convert_text_to_date(row[2])
+                if record_date.strftime("%Y-%m") != last_month:
+                    continue
+
             batch.append(tuple(row))
+            print(f"Wczytano do batcha rekord nr: {batch_iterator}.{len(batch)}")
 
             if len(batch) >= 1000:
                 execute_values(cursor, """
@@ -56,9 +87,10 @@ def load_data_from_csv(file_path, db_params):
                     ) VALUES %s
                 """, batch)
                 conn.commit()
+                print(f"WCZYTANO do b.danych cały Batch o nr-ze: {batch_iterator}, liczba jego rekordów: {len(batch)}")
                 batch = []
+                batch_iterator += 1
 
-        
         if batch:
             execute_values(cursor, """
                 INSERT INTO reporting_results2020 (
@@ -71,42 +103,21 @@ def load_data_from_csv(file_path, db_params):
                 ) VALUES %s
             """, batch)
             conn.commit()
+            print(f"WCZYTANO OSTATNI Batch do b.danych, ma on nr: {batch_iterator}, liczba jego rekordów: {len(batch)}")
 
     cursor.close()
     conn.close()
     print("Wczytywanie danych zakończone.")
 
-
-def remove_duplicates(db_params):
-    print("Usuwanie duplikatów...")
-    conn = psycopg2.connect(
-        dbname=db_params['db_name'],
-        user=db_params['user'],
-        password=db_params['password'],
-        host=db_params['host']
-    )
-    cursor = conn.cursor()
-    cursor.execute("""
-        DELETE FROM reporting_results2020
-        WHERE ctid IN (
-            SELECT ctid
-            FROM (
-                SELECT ctid, ROW_NUMBER() OVER (
-                    PARTITION BY numer_ewidencyjny_system
-                    ORDER BY (SELECT 1)
-                ) AS rn
-                FROM reporting_results2020
-            ) t
-            WHERE rn > 1
-        );
-    """)
-    conn.commit()
-    cursor.close()
-    conn.close()
-    print("Duplikaty usunięte.")
-
+def parse_arguments():
+    parser = argparse.ArgumentParser(description='Download and process ZIP data.')
+    parser.add_argument('--mode', type=str, default='full', choices=['full', 'update'],
+                        help='Tryb uruchamiania skryptu: "full" dla pełnego załadowania danych, "update" dla aktualizacji danych.')
+    return parser.parse_args()
 
 def main():
+    args = parse_arguments()
+
     url = 'https://wyszukiwarka.gunb.gov.pl/pliki_pobranie/wynik_zgloszenia_2020_up.zip'
     local_zip_path = 'zip_data.zip'
     extract_to_folder = 'unpacked_zip_data_files'
@@ -119,10 +130,19 @@ def main():
         'password': os.environ.get('POSTGRES_PASSWORD')
     }
 
-    download_and_unpack_zip(url, local_zip_path, extract_to_folder)
-    load_data_from_csv(csv_file_path, db_params)
-    remove_duplicates(db_params)
+    if args.mode == 'full':
+        if check_if_empty(db_params):
+            print("Baza danych jest pusta. Rozpoczynanie pełnego załadowania danych.")
+            download_and_unpack_zip(url, local_zip_path, extract_to_folder)
+            load_data_from_csv(csv_file_path, db_params, args.mode)
+        else:
+            print("Baza danych nie jest pusta. Zakończenie działania programu.")
+            return
 
+    elif args.mode == 'update':
+        print("Rozpoczynanie aktualizacji danych z ostatniego miesiąca.")
+        download_and_unpack_zip(url, local_zip_path, extract_to_folder)
+        load_data_from_csv(csv_file_path, db_params, args.mode)
 
 if __name__ == "__main__":
     print("Rozpoczynanie głównego procesu...")

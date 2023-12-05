@@ -19,16 +19,16 @@ services:
             POSTGRES_USER: ${POSTGRES_USER}
             POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
             POSTGRES_DB: ${POSTGRES_DB}
-    # jupyter:
-    #     depends_on:
-    #         - database_container1000
-    #     build: ./JupyterNotebookFolder
-    #     volumes:
-    #         - ./JupyterNotebookFolder/jpdata:/JupyterNotebookFolder/jpdata
-    #     ports:
-    #         - 8888:8888
-    #     command: start-notebook.sh --NotebookApp.token=''
-    #     environment:
-    #         POSTGRES_USER: ${POSTGRES_USER}
-    #         POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
-    #         POSTGRES_DB: ${POSTGRES_DB}
+    jupyter:
+        depends_on:
+            - zip_data_postgres_db
+        build: ./zip_data_jupyter_notebook
+        volumes:
+            - ./zip_data_jupyter_notebook/jpdata:/Jzip_data_jupyter_notebook/jpdata
+        ports:
+            - 8888:8888
+        command: start-notebook.sh --NotebookApp.token=''
+        environment:
+            POSTGRES_USER: ${POSTGRES_USER}
+            POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+            POSTGRES_DB: ${POSTGRES_DB}
