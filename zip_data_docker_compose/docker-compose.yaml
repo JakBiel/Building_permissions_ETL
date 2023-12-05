@@ -24,7 +24,7 @@ services:
             - zip_data_postgres_db
         build: ./zip_data_jupyter_notebook
         volumes:
-            - ./zip_data_jupyter_notebook/jpdata:/Jzip_data_jupyter_notebook/jpdata
+            - ./zip_data_jupyter_notebook/jpdata:/zip_data_jupyter_notebook/jpdata
         ports:
             - 8888:8888
         command: start-notebook.sh --NotebookApp.token=''
