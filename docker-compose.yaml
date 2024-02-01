@@ -39,7 +39,7 @@
 version: '3'
 x-airflow-common:
   &airflow-common
-  image: ${AIRFLOW_IMAGE_NAME:-airflowsuper:latest}
+  image: ${AIRFLOW_IMAGE_NAME:-extending_airflow:latest}
   environment:
     &airflow-common-env
     AIRFLOW__CORE__EXECUTOR: LocalExecutor
@@ -50,6 +50,9 @@ x-airflow-common:
     AIRFLOW__CORE__DAGS_ARE_PAUSED_AT_CREATION: 'true'
     AIRFLOW__CORE__LOAD_EXAMPLES: 'false'
     AIRFLOW__API__AUTH_BACKENDS: 'airflow.api.auth.backend.basic_auth'
+    POSTGRES_USER: ${POSTGRES_USER}
+    POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+    POSTGRES_DB: ${POSTGRES_DB}
   volumes:
     - ./dags:/opt/airflow/dags
     - ./logs:/opt/airflow/logs
@@ -62,6 +65,12 @@ x-airflow-common:
       condition: service_healthy
 
 services:
+  extending_airflow_builder:
+    build:
+      context: .
+      dockerfile: ./airflow_dockerfile/Dockerfile
+    image: extending_airflow:latest
+    command: echo "Airflow image built successfully."
   postgres:
     image: postgres:13
     environment:
@@ -128,15 +137,15 @@ services:
       ports:
           - 5432:5432
 
-  zip_data_downloader_app: #Container for a Python app downloading and unpacking .zip data from the source web page
-      depends_on:
-          - zip_data_postgres_db
-      build: ./zip_data_downloader_app
-      restart: on-failure
-      environment:
-          POSTGRES_USER: ${POSTGRES_USER}
-          POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
-          POSTGRES_DB: ${POSTGRES_DB}
+  # zip_data_downloader_app: #Container for a Python app downloading and unpacking .zip data from the source web page
+  #     depends_on:
+  #         - zip_data_postgres_db
+  #     build: ./zip_data_downloader_app
+  #     restart: on-failure
+  #     environment:
+  #         POSTGRES_USER: ${POSTGRES_USER}
+  #         POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+  #         POSTGRES_DB: ${POSTGRES_DB}
 
   jupyter:
       depends_on:
