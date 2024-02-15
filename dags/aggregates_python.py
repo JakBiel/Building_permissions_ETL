@@ -1,5 +1,6 @@
 from airflow import DAG
 from airflow.operators.python import PythonOperator
+from airflow.models import Variable
 import pandas as pd
 from datetime import datetime, timedelta
 from great_expectations.dataset import PandasDataset
@@ -42,6 +43,21 @@ def convert_text_to_date(text_date):
         wrong_text_to_date_iterator = wrong_text_to_date_iterator + 1
         return None
 
+#Especially for Apache Airflow metadata dates convertion
+def convert_iso_to_standard_format(iso_date_str):
+    """Convert an ISO 8601 date string to 'YYYY-MM-DD HH:MM:SS' format for Python versions older than 3.7."""
+    try:
+        # Parse the ISO 8601 string to a datetime object manually
+        # Note: This assumes the input is always in 'YYYY-MM-DDTHH:MM:SS.ssssss' format
+        date_obj = datetime.strptime(iso_date_str.split('.')[0], '%Y-%m-%dT%H:%M:%S')
+        
+        # Format the datetime object back to a string in 'YYYY-MM-DD HH:MM:SS' format
+        standard_date_str = date_obj.strftime('%Y-%m-%d %H:%M:%S')
+        
+        return standard_date_str
+    except ValueError as e:
+        print(f"Error converting date: {e}")
+        return None
 
 # Data processing and validation functions
 def filter_data_on_date(file_path, min_date_str):
@@ -60,7 +76,7 @@ def filter_data_on_date(file_path, min_date_str):
     filtered_df = df
     if min_date_str != 0:
         min_date = convert_text_to_date(min_date_str)      
-        filtered_df = df[df['data_wplywu_wniosku_do_urzedu'] >= min_date]
+        filtered_df = df[df['data_wplywu_wniosku_do_urzedu'] > min_date]
     
     return filtered_df
 
@@ -71,10 +87,8 @@ def apply_additional_criteria(df, db_params):
     batch_iterator = 0
     all_data = []  # Store all data for new DataFrame
 
-    #print("Connecting to the database...")
     conn = psycopg2.connect(**db_params)
-    #print("Connection established.")
-    
+
     cursor = conn.cursor()
 
     # Define the column names for the new DataFrame
@@ -96,9 +110,7 @@ def apply_additional_criteria(df, db_params):
             all_data.append(row_to_tuple(row))
             if len(batch) >= batch_size:
                 
-                #print(f"Starting to process batch {batch_iterator}...")
                 manage_batch(cursor, conn, batch, batch_size, batch_iterator)
-                #print(f"Batch {batch_iterator} processing completed.")
 
                 batch.clear()
                 batch_iterator += 1
@@ -140,10 +152,7 @@ def row_to_tuple(row):
 
 def manage_batch(cursor, conn1, batch, batch_size, batch_iterator):
     """Manage batch insertions to the database."""
-    #print(f"Loading batch {batch_iterator} to the database...")
-    #print(f"Loading batch {batch_iterator} to the database with {len(batch)} records...")
-    #for i, record in enumerate(batch):
-    #    print(f"Record {i}: {record}")
+    print(f"Loading batch {batch_iterator} to the database with {len(batch)} records...")
 
     try:
         execute_values(cursor, """
@@ -156,10 +165,8 @@ def manage_batch(cursor, conn1, batch, batch_size, batch_iterator):
                 projektant_numer_uprawnien, projektant_pozostali
             ) VALUES %s
         """, batch, page_size=batch_size)
-        #print("Batch executed successfully")
     except Exception as e:
         print(f"Error executing batch: {e}")
-    #print("Pre-ready - batch number: {batch_iterator}, number of records: {len(batch)}")
     conn1.commit()
     print(f"Loaded a full batch to the database, batch number: {batch_iterator}, number of records: {len(batch)}")
 
@@ -176,49 +183,44 @@ def data_validation(validated_df):
 
 def download_and_unpack_zip(url, local_zip_path, extract_to_folder):
     """Download and unpack a ZIP file."""
-    print("Rozpoczynanie pobierania pliku ZIP...")
+    print("Starting the ZIP file downloading...")
     response = requests.get(url)
     with open(local_zip_path, 'wb') as file:
         file.write(response.content)
-    print("Plik ZIP pobrany. Rozpoczynanie rozpakowywania...")
+    print("The ZIP file downloaded. The unpacking process has been started...")
     with zipfile.ZipFile(local_zip_path, 'r') as zip_ref:
         zip_ref.extractall(extract_to_folder)
-    print("Rozpakowywanie zakończone.")
+    print("The unpacking process has been finished")
 
 def load_data_from_csv_to_db(file_path, db_params, ti):
     """Load data from a CSV file into the database."""
-    print("Łączenie z bazą danych...")
+    print("Connecting the database...")
     conn = psycopg2.connect(**db_params)
     cursor = conn.cursor()
 
     cursor.execute("SELECT EXISTS(SELECT 1 FROM reporting_results2020 LIMIT 1)")
     table_has_records = cursor.fetchone()[0]
     mode = 'update' if table_has_records else 'full'
+    print(f"mode value is {mode}")
 
-    if mode == 'update': 
-        latest_date_before_convertion = ti.xcom_pull(task_ids='uzipped_data_uploader_and_validation_task', key='last_success_date')
-        latest_date = convert_text_to_date(ti.xcom_pull(task_ids='uzipped_data_uploader_and_validation_task', key='last_success_date'))
+    if mode == 'update':
+        latest_date_before_convertion = Variable.get("last_success_date_for_my_dag", default_var=None)
+        latest_date = convert_iso_to_standard_format(latest_date_before_convertion)
         if latest_date is None:
             latest_date = 0
             latest_date_before_convertion = 0 
-            cursor.execute("TRUNCATE TABLE reporting_results2020 RESTART IDENTITY;") 
     else:
         latest_date = 0
         latest_date_before_convertion = 0
 
-    #DEBUGGING PRINTS:
-    #print(f"UWAGA: przed konwersją, latest_date ma wartość: {latest_date_before_convertion} ")
-    #print(f"UWAGA: aktualna wartość latest_date wynosi: {latest_date}")
+    print(f"CAUTION: before the date conversion, <latest_date> has a value: {latest_date_before_convertion} ")
+    print(f"CAUTION: current value of the <latest_date> parameter is {latest_date}")
 
-    #print("Starting to filter data on date...")
     filtered_df = filter_data_on_date(file_path, latest_date)
-    #print("Data filtering completed.")
 
-    #print("Starting to apply additional criteria...")
     validation_df = apply_additional_criteria(filtered_df, db_params)
-    #print("Applying additional criteria completed.")
 
-    #print(f"UWAGA: liczba zliczonych, źle skonwertowanych dat: {wrong_text_to_date_iterator}")
+    print(f"CAUTION: the number of the counted incorrectly-converted dates: {wrong_text_to_date_iterator}")
 
     cursor.close()
     conn.close()
@@ -250,7 +252,7 @@ def main_of_unzipped_data_uploader_and_validation(ti):
     # Pass 'conn' as an argument to the 'data_validation' function
     data_validation(df_to_be_validated)
 
-    ti.xcom_push(key='last_success_date', value=datetime.utcnow().isoformat())
+    Variable.set("last_success_date_for_my_dag", datetime.utcnow().isoformat())
 
     print("Data upload and validation completed.")
 
@@ -296,13 +298,9 @@ def main_of_aggregates_creation(ti):
     aggregate2m = aggregate_creator(df_last_2m, "2m")
     aggregate1m = aggregate_creator(df_last_1m, "1m")
 
-    #TEMPORARILY COMMENTED
-    # # Save the ordered DataFrame to a CSV file, ensuring 'injection_date' is the second column
-
     summary_aggregate = merge_aggregates(aggregate3m,aggregate2m,aggregate1m)
 
     final_aggregate = correct_aggregates_column_order_plus_injection_date(summary_aggregate)
-    #aggregate3m1 = correct_aggregates_column_order_plus_injection_date(aggregate3m)
 
     path_to_save = '/opt/airflow/desktop/aggregate_result.csv'
     final_aggregate.to_csv(path_to_save, index=False)
@@ -338,11 +336,6 @@ def merge_aggregates(aggregate3m, aggregate2m, aggregate1m):
 
     return merged_aggregate
 
-
-
-
-
-
 def correct_aggregates_column_order_plus_injection_date(aggregate_0):
 
     # Adding 'injection_date' after ensuring 'terc' is a column
@@ -370,17 +363,17 @@ with DAG(
         catchup=False,  # no catching-up if scheduled dag failed
 ) as dag:
 
-    # zip_data_downloader_task = PythonOperator(
-    #     task_id='zip_data_downloader_task',
-    #     python_callable=main_of_zip_data_downloader,
-    #     dag=dag
-    # )
+    zip_data_downloader_task = PythonOperator(
+        task_id='zip_data_downloader_task',
+        python_callable=main_of_zip_data_downloader,
+        dag=dag
+    )
 
-    # uzipped_data_uploader_and_validation_task = PythonOperator(
-    #     task_id='uzipped_data_uploader_and_validation_task',
-    #     python_callable=main_of_unzipped_data_uploader_and_validation,
-    #     dag=dag
-    # )
+    uzipped_data_uploader_and_validation_task = PythonOperator(
+        task_id='uzipped_data_uploader_and_validation_task',
+        python_callable=main_of_unzipped_data_uploader_and_validation,
+        dag=dag
+    )
 
     aggregates_creation_task = PythonOperator(
         task_id='aggregates_creation_task',
@@ -388,6 +381,5 @@ with DAG(
         dag=dag
     )
 
-# Task dependencies
-#zip_data_downloader_task >> uzipped_data_uploader_and_validation_task >> aggregates_creation_task
-aggregates_creation_task
+#Task dependencies
+zip_data_downloader_task >> uzipped_data_uploader_and_validation_task >> aggregates_creation_task

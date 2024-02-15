@@ -2,7 +2,7 @@ CREATE TABLE reporting_results2020 (
     id SERIAL PRIMARY KEY,
     numer_ewidencyjny_system TEXT,
     numer_ewidencyjny_urzad TEXT,
-    data_wplywu_wniosku_do_urzedu TIMESTAMP,
+    data_wplywu_wniosku_do_urzedu TEXT,
     nazwa_organu TEXT,
     wojewodztwo_objekt TEXT,
     obiekt_kod_pocztowy TEXT,
