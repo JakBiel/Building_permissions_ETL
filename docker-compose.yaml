@@ -53,6 +53,16 @@ x-airflow-common:
     POSTGRES_USER: ${POSTGRES_USER}
     POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
     POSTGRES_DB: ${POSTGRES_DB}
+    #Email Operator in Apache - environment variables
+    EMAIL_ADDRESS_1: ${EMAIL_ADDRESS_1}
+    EMAIL_ADDRESS_2: ${EMAIL_ADDRESS_2}
+    AIRFLOW__SMTP__SMTP_HOST: 'smtp.gmail.com'
+    AIRFLOW__SMTP__SMTP_USER: ${EMAIL_ADDRESS_1}
+    AIRFLOW__SMTP__STARTTLS: 'true'
+    AIRFLOW__SMTP__SSL: 'false'
+    AIRFLOW__SMTP__SMTP_PASSWORD: ${THE_G_PASS}
+    AIRFLOW__SMTP__SMTP_PORT: '587'
+    AIRFLOW__SMTP__SMTP_MAIL_FROM: ${EMAIL_ADDRESS_1}
   volumes:
     - ./dags:/opt/airflow/dags
     - ./logs:/opt/airflow/logs
