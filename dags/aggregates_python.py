@@ -1,15 +1,23 @@
-from airflow import DAG
-from airflow.operators.python import PythonOperator
-from airflow.operators.email import EmailOperator
-import pandas as pd
-from datetime import datetime, timedelta
-from sqlalchemy import create_engine
+import logging
 import os
-from great_expectations.exceptions import GreatExpectationsError
-import psycopg2
-from psycopg2.extras import execute_values
+from datetime import datetime, timedelta
 
-from aggregates_python_helpers import (download_and_unpack_zip, validation, load_data_from_csv_to_db,superior_aggregates_creator, absolute_path, html_content) 
+import pandas as pd
+import psycopg2
+from aggregates_python_helpers import (
+    absolute_path,
+    download_and_unpack_zip,
+    html_content,
+    load_data_from_csv_to_db,
+    superior_aggregates_creator,
+    validation,
+)
+from airflow import DAG
+from airflow.operators.email import EmailOperator
+from airflow.operators.python import PythonOperator
+from great_expectations.exceptions import GreatExpectationsError
+from psycopg2.extras import execute_values
+from sqlalchemy import create_engine
 
 default_args = {
     'owner': 'YOUR_NAME',
@@ -40,7 +48,7 @@ def main_of_unzipped_data_uploader(ti):
     # Pass 'conn' as an argument to the 'load_data_from_csv_to_db' function
     load_data_from_csv_to_db(csv_file_path, db_params, ti)
 
-    print("Data upload and validation completed.")
+    logging.info("Data upload and validation completed.")
 
 def main_of_zip_data_downloader(ti):
     """Main function for ZIP data downloader."""

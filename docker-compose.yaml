@@ -63,6 +63,7 @@ x-airflow-common:
     AIRFLOW__SMTP__SMTP_PASSWORD: ${THE_G_PASS}
     AIRFLOW__SMTP__SMTP_PORT: '587'
     AIRFLOW__SMTP__SMTP_MAIL_FROM: ${EMAIL_ADDRESS_1}
+    AIRFLOW_CONN_GOOGLE_CLOUD_DEFAULT: 'google-cloud-platform://?key_path=/opt/airflow/data/credentials.json&scope=https%3A%2F%2Fwww.googleapis.com%2Fauth%2Fcloud-platform&airflow-lab&num_retries=5'
   volumes:
     - ./dags:/opt/airflow/dags
     - ./logs:/opt/airflow/logs

@@ -1,18 +1,16 @@
-from great_expectations.dataset import PandasDataset
 import json
+import logging
 import os
-import roman
-import pandas as pd
 import sys
-import psycopg2
-from datetime import datetime, timedelta
-from sqlalchemy import create_engine
-import requests
 import zipfile
+from datetime import datetime, timedelta
 
-#Global variables
-wrong_text_to_date_iterator = 0
-correct_text_to_date_iterator = 0
+import pandas as pd
+import psycopg2
+import requests
+import roman
+from great_expectations.dataset import PandasDataset
+from sqlalchemy import create_engine
 
 # Use the absolute path if you need to navigate from the current working directory
 absolute_path = '/opt/airflow/data/validation_results.json'
@@ -29,14 +27,14 @@ html_content = """
 
 def download_and_unpack_zip(url, local_zip_path, extract_to_folder):
     """Download and unpack a ZIP file."""
-    print("Starting the ZIP file downloading...")
+    logging.info("Starting the ZIP file downloading...")
     response = requests.get(url)
     with open(local_zip_path, 'wb') as file:
         file.write(response.content)
-    print("The ZIP file downloaded. The unpacking process has been started...")
+    logging.info("The ZIP file downloaded. The unpacking process has been started...")
     with zipfile.ZipFile(local_zip_path, 'r') as zip_ref:
         zip_ref.extractall(extract_to_folder)
-    print("The unpacking process has been finished")
+    logging.info("The unpacking process has been finished")
 
 def validation(file_path):
     # Read data from CSV into a pandas DataFrame
@@ -54,22 +52,12 @@ def validation(file_path):
     validation_results = dataset.validate()
     validation_results_json = validation_results.to_json_dict()
 
-    #Debug print
-    print(f"Current working directory: {os.getcwd()}")
+    #Checking the directory status by logging.info
+    logging.info(f"Current working directory: {os.getcwd()}")
 
     # Convert to the absolute path
     absolute_path = '/opt/airflow/data/validation_results.json'
-    #Debug print
-    print(f"Absolute path: {absolute_path}")  # Print the absolute path
-
-    # Check if the directory exists
-    #Debug prints
-    directory_path = os.path.dirname(absolute_path)
-    if not os.path.exists(directory_path):
-        print(f"Directory does not exist: {directory_path}")
-    else:
-        print(f"Directory exists: {directory_path}")
-
+    logging.info(f"Absolute path: {absolute_path}")
 
     # Save the validation results to a JSON file
     with open(absolute_path, 'w') as json_file:
@@ -86,14 +74,14 @@ def create_roman_set():
 
 def load_data_from_csv_to_db(file_path, db_params, ti=None, **kwargs):
     """Load data from a CSV file into the database."""
-    print("Connecting the database...")
+    logging.info("Connecting the database...")
     conn = psycopg2.connect(**db_params)
     cursor = conn.cursor()
 
     cursor.execute("SELECT EXISTS(SELECT 1 FROM reporting_results2020 LIMIT 1)")
     table_has_records = cursor.fetchone()[0]
     mode = 'update' if table_has_records else 'full'
-    print(f"mode value is {mode}")
+    logging.info(f"mode value is {mode}")
 
     if mode == 'update':
         today_date_before_convertion = kwargs.get('execution_date', datetime.utcnow())
@@ -104,23 +92,19 @@ def load_data_from_csv_to_db(file_path, db_params, ti=None, **kwargs):
             today_date = convert_iso_to_standard_format(today_date_before_convertion)
         today_date_minus_month = get_first_day_of_previous_month(today_date)
         if today_date is None or today_date_minus_month is None:
-            print("Critical Error: 'today_date' or 'today_date_minus_month' is None. Exiting program.", file=sys.stderr)
+            logging.critical("Critical Error: 'today_date' or 'today_date_minus_month' is None. Exiting program.", file=sys.stderr)
             raise Exception("InvalidDateError: Either 'today_date' or 'today_date_minus_month' has failed to be set properly.")
     else:
         today_date = 0
         today_date_before_convertion = 0
 
-    print(f"CAUTION: before the date convertion, <today_date> has a value: {today_date_before_convertion} ")
-    print(f"CAUTION: current value of the <today_date> parameter is {today_date}")
-    print(f"CAUTION: current value of the <today_date_minus_month> parameter is {today_date_minus_month}")
+    logging.info(f"CAUTION: before the date convertion, <today_date> has a value: {today_date_before_convertion} ")
+    logging.info(f"CAUTION: current value of the <today_date> parameter is {today_date}")
+    logging.info(f"CAUTION: current value of the <today_date_minus_month> parameter is {today_date_minus_month}")
 
     filtered_df = filter_data_on_date(file_path, today_date_minus_month)
 
     insert_permissions_to_db(filtered_df, db_params)
-
-    print(f"CAUTION: the number of the counted incorrectly-converted dates: {wrong_text_to_date_iterator}")
-    print(f"CAUTION: the number of the counted CORRECTLY-converted dates: {correct_text_to_date_iterator}")
-    print(f"CAUTION: the GENERAL number of the counted converted dates [both, incorrectly and correctly]: {correct_text_to_date_iterator + wrong_text_to_date_iterator}")
 
     cursor.close()
     conn.close()
@@ -138,7 +122,7 @@ def convert_iso_to_standard_format(iso_date_str):
         
         return standard_date_str
     except ValueError as e:
-        print(f"Error converting date: {e}")
+        logging.error(f"Error converting date: {e}")
         return None
     
 def get_first_day_of_previous_month(date_str):
@@ -182,7 +166,7 @@ def insert_permissions_to_db(df, db_params):
         # Load the batch into the database
         df_batch.to_sql('reporting_results2020', engine, if_exists='append', index=False, method='multi')
         
-        print(f"Loaded batch {batch_num + 1} of {num_batches} to the database")
+        logging.info(f"Loaded batch {batch_num + 1} of {num_batches} to the database")
 
     # Close the database engine
     engine.dispose()
@@ -200,7 +184,7 @@ def filter_data_on_date(file_path, min_date_str):
     ]
 
     df = pd.read_csv(file_path, delimiter='#', names=column_names, header=0)
-    df['data_wplywu_wniosku_do_urzedu'] = df['data_wplywu_wniosku_do_urzedu'].apply(convert_text_to_date)
+    df['data_wplywu_wniosku_do_urzedu'] = convert_column_to_date(df, 'data_wplywu_wniosku_do_urzedu')
     filtered_df = df
     if min_date_str != 0:
         min_date = convert_text_to_date(min_date_str)      
@@ -208,20 +192,25 @@ def filter_data_on_date(file_path, min_date_str):
     
     return filtered_df
 
+def convert_column_to_date(df, column_name):
+    converted = pd.to_datetime(df[column_name], format='%Y-%m-%d %H:%M:%S', errors='coerce')
+    successful_conversions = converted.notna().sum()
+    converted = converted.where(converted.notna(), None)
+    failed_conversions = len(converted) - successful_conversions
+    logging.info(f"Successful conversions: {successful_conversions}, Failed conversions: {failed_conversions}, Total conversions: {len(converted)}")
+    return converted
+
+
 def convert_text_to_date(text_date):
     """Convert text to datetime object."""
-    global wrong_text_to_date_iterator
-    global correct_text_to_date_iterator
     if pd.isnull(text_date):
-        wrong_text_to_date_iterator += 1
         return None
     
     try:
         converted_date = datetime.strptime(str(text_date), '%Y-%m-%d %H:%M:%S')
-        correct_text_to_date_iterator += 1
         return converted_date
     except ValueError:
-        wrong_text_to_date_iterator += 1
+        logging.info(f"Unsuccessful conversion in <convert_text_to_date> function")
         return 
     
 def superior_aggregates_creator(postgres_user, postgres_password, postgres_db):
@@ -261,7 +250,7 @@ def superior_aggregates_creator(postgres_user, postgres_password, postgres_db):
     path_to_save = '/opt/airflow/desktop/aggregate_result.csv'
     final_aggregate.to_csv(path_to_save, index=False)
 
-    print(f"Aggregate has been saved to: {path_to_save}")
+    logging.info(f"Aggregate has been saved to: {path_to_save}")
 
 def aggregate_creator(df, prefix):
     aggregate = pd.pivot_table(df, index=['terc'], columns=['kategoria', 'rodzaj_zam_budowlanego'], 
