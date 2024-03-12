@@ -3,7 +3,6 @@ import os
 from datetime import datetime, timedelta
 
 import pandas as pd
-import psycopg2
 from aggregates_python_helpers import (
     absolute_path,
     download_and_unpack_zip,
@@ -17,7 +16,6 @@ from airflow.operators.email import EmailOperator
 from airflow.operators.python import PythonOperator
 from great_expectations.exceptions import GreatExpectationsError
 from psycopg2.extras import execute_values
-from sqlalchemy import create_engine
 
 default_args = {
     'owner': 'YOUR_NAME',
@@ -29,24 +27,7 @@ def main_of_unzipped_data_uploader(ti):
     # Path to the CSV file containing data to be validated
     csv_file_path = 'unpacked_zip_data_files/wynik_zgloszenia_2022_up.csv'
 
-    # Database connection parameters
-    db_params = {
-        'host': "zip_data_postgres_db",
-        'dbname': os.environ.get('POSTGRES_DB'),
-        'user': os.environ.get('POSTGRES_USER'),
-        'password': os.environ.get('POSTGRES_PASSWORD')
-    }
-
-    # Initialize a database connection
-    conn = psycopg2.connect(
-        dbname=db_params['dbname'],
-        user=db_params['user'],
-        password=db_params['password'],
-        host=db_params['host']
-    )
-
-    # Pass 'conn' as an argument to the 'load_data_from_csv_to_db' function
-    load_data_from_csv_to_db(csv_file_path, db_params, ti)
+    load_data_from_csv_to_db(csv_file_path, ti)
 
     logging.info("Data upload and validation completed.")
 
@@ -64,13 +45,8 @@ def main_of_validation(ti):
 
 def main_of_aggregates_creation(ti):
     """Main function for aggregates creation."""
-    # Set connection parameters
 
-    postgres_user = os.environ.get('POSTGRES_USER')
-    postgres_password = os.environ.get('POSTGRES_PASSWORD')
-    postgres_db = os.environ.get('POSTGRES_DB')
-
-    superior_aggregates_creator(postgres_user, postgres_password, postgres_db)    
+    superior_aggregates_creator()    
 
 # Adding the attachment (make sure the file exists before sending the email)
 attachments = [absolute_path]

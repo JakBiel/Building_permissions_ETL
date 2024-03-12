@@ -6,11 +6,11 @@ import zipfile
 from datetime import datetime, timedelta
 
 import pandas as pd
-import psycopg2
 import requests
 import roman
+from google.cloud import bigquery
 from great_expectations.dataset import PandasDataset
-from sqlalchemy import create_engine
+from pandas_gbq import to_gbq
 
 # Use the absolute path if you need to navigate from the current working directory
 absolute_path = '/opt/airflow/data/validation_results.json'
@@ -72,14 +72,24 @@ def create_roman_set():
         roman_set.add(roman_number)
     return roman_set
 
-def load_data_from_csv_to_db(file_path, db_params, ti=None, **kwargs):
+def load_data_from_csv_to_db(file_path,  ti=None, **kwargs):
     """Load data from a CSV file into the database."""
     logging.info("Connecting the database...")
-    conn = psycopg2.connect(**db_params)
-    cursor = conn.cursor()
 
-    cursor.execute("SELECT EXISTS(SELECT 1 FROM reporting_results2020 LIMIT 1)")
-    table_has_records = cursor.fetchone()[0]
+    client = bigquery.Client()
+    table_id = "airflow-lab-415614.airflow_dataset.reporting_results2020"
+
+    query = """
+    SELECT EXISTS(
+        SELECT 1 FROM `airflow-lab-415614.airflow_dataset.reporting_results2020` LIMIT 1
+    )
+    """
+    query_job = client.query(query) 
+    results = query_job.result()
+
+    for row in results:
+        table_has_records = row[0]
+
     mode = 'update' if table_has_records else 'full'
     logging.info(f"mode value is {mode}")
 
@@ -88,15 +98,17 @@ def load_data_from_csv_to_db(file_path, db_params, ti=None, **kwargs):
         if isinstance(today_date_before_convertion, datetime):
             today_date_str = today_date_before_convertion.strftime('%Y-%m-%dT%H:%M:%S')
             today_date = convert_iso_to_standard_format(today_date_str)
+            today_date_minus_month = get_first_day_of_previous_month(today_date)
         else:
             today_date = convert_iso_to_standard_format(today_date_before_convertion)
-        today_date_minus_month = get_first_day_of_previous_month(today_date)
+            today_date_minus_month = get_first_day_of_previous_month(today_date)
         if today_date is None or today_date_minus_month is None:
             logging.critical("Critical Error: 'today_date' or 'today_date_minus_month' is None. Exiting program.", file=sys.stderr)
             raise Exception("InvalidDateError: Either 'today_date' or 'today_date_minus_month' has failed to be set properly.")
     else:
         today_date = 0
         today_date_before_convertion = 0
+        today_date_minus_month = 0
 
     logging.info(f"CAUTION: before the date convertion, <today_date> has a value: {today_date_before_convertion} ")
     logging.info(f"CAUTION: current value of the <today_date> parameter is {today_date}")
@@ -104,10 +116,7 @@ def load_data_from_csv_to_db(file_path, db_params, ti=None, **kwargs):
 
     filtered_df = filter_data_on_date(file_path, today_date_minus_month)
 
-    insert_permissions_to_db(filtered_df, db_params)
-
-    cursor.close()
-    conn.close()
+    insert_permissions_to_db(filtered_df)
 
 #Especially for Apache Airflow metadata dates convertion
 def convert_iso_to_standard_format(iso_date_str):
@@ -143,13 +152,20 @@ def get_first_day_of_previous_month(date_str):
     new_date = datetime(year, month, 1)
     return new_date.strftime('%Y-%m-%d %H:%M:%S')  # Return the new date as a string in the same format
 
-def insert_permissions_to_db(df, db_params):
+def insert_permissions_to_db(df):
     """Load data from a Pandas DataFrame into the database in batches after filtering out null dates."""
 
     batch_size=1000
 
-    # Create a database engine
-    engine = create_engine(f"postgresql://{db_params['user']}:{db_params['password']}@{db_params['host']}/{db_params['dbname']}")
+    # Establish a BigQuery connection
+    client = bigquery.Client()
+    table_id = "airflow-lab-415614.airflow_dataset.reporting_results2020"
+    shorter_table_id = "airflow_dataset.reporting_results2020"
+
+    table = client.get_table(table_id)
+
+    table_schema = table.schema
+
 
     # Filter out rows where 'data_wplywu_wniosku_do_urzedu' is NaN
     df_filtered = df.dropna(subset=['data_wplywu_wniosku_do_urzedu'])
@@ -163,13 +179,21 @@ def insert_permissions_to_db(df, db_params):
         end_index = start_index + batch_size
         df_batch = df_filtered.iloc[start_index:end_index]
         
+        #PREVIOUS Version
         # Load the batch into the database
-        df_batch.to_sql('reporting_results2020', engine, if_exists='append', index=False, method='multi')
-        
-        logging.info(f"Loaded batch {batch_num + 1} of {num_batches} to the database")
+        # job = client.load_table_from_dataframe(df_batch, table_id)
+        # job.result()
 
-    # Close the database engine
-    engine.dispose()
+        #CURRENT Version
+        # Load the batch into the database
+    
+        df_batch['data_wplywu_wniosku_do_urzedu'] = df_batch['data_wplywu_wniosku_do_urzedu'].astype(str)
+
+        schema_dicts = [{'name': field.name, 'type': field.field_type, 'mode': field.mode} for field in table_schema]
+
+        to_gbq(df_batch, destination_table=shorter_table_id, if_exists='append', table_schema=schema_dicts)
+
+        logging.info(f"Loaded batch {batch_num + 1} of {num_batches} to the database")
 
 # Data processing and validation functions
 def filter_data_on_date(file_path, min_date_str):
@@ -213,17 +237,19 @@ def convert_text_to_date(text_date):
         logging.info(f"Unsuccessful conversion in <convert_text_to_date> function")
         return 
     
-def superior_aggregates_creator(postgres_user, postgres_password, postgres_db):
+def superior_aggregates_creator():
 
-    HOST='host.docker.internal'
-    engine = create_engine(f'postgresql://{postgres_user}:{postgres_password}@{HOST}:5432/{postgres_db}')
+    client = bigquery.Client()
 
     # Execute SQL query to select records from the last 3 months
     query = """
-    SELECT * FROM public.reporting_results2020
-    WHERE data_wplywu_wniosku_do_urzedu::timestamp >= current_date - INTERVAL '3 months';
+    SELECT *
+    FROM `airflow-lab-415614.airflow_dataset.reporting_results2020`
+    WHERE DATE(TIMESTAMP(data_wplywu_wniosku_do_urzedu)) >= DATE_SUB(CURRENT_DATE(), INTERVAL 3 MONTH);
     """
-    df = pd.read_sql_query(query, engine)
+
+    query_job = client.query(query)
+    df = query_job.to_dataframe()
 
     df['data_wplywu_wniosku_do_urzedu'] = pd.to_datetime(df['data_wplywu_wniosku_do_urzedu'], errors='coerce')
     df['terc'] = pd.to_numeric(df['terc'], errors='coerce').fillna(0).astype(int)

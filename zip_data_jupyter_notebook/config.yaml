@@ -1,0 +1,4 @@
+PROJECT_ID: 'airflow-lab-415614'
+DATASET_NAME: 'airflow_dataset'
+TABLE_NAME: 'reporting_results2020'
+JSON_KEY_BQ: credentials.json
