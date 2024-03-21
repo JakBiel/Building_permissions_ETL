@@ -6,7 +6,7 @@ import pandas as pd
 from aggregates_python_helpers import (
     absolute_path,
     download_and_unpack_zip,
-    html_content,
+    email_callback,
     load_data_from_csv_to_db,
     superior_aggregates_creator,
     validation,
@@ -48,9 +48,9 @@ def main_of_aggregates_creation(ti):
 
     superior_aggregates_creator()    
 
-# Adding the attachment (make sure the file exists before sending the email)
-attachments = [absolute_path]
-
+def main_of_send_email_with_attachment(ti):
+    
+    email_callback()
 
 # DAG definition
 with DAG(
@@ -86,16 +86,12 @@ with DAG(
         dag=dag
     )
 
-    # Define the EmailOperator task
-    mail_task = EmailOperator(
-        task_id='send_email',
-        to=os.environ.get('EMAIL_ADDRESS_2'),  # Use environment variable for recipient email
-        subject='ETL Process Report',
-        html_content=html_content,  # Set the HTML content for the email
-        files=attachments,  # Attach the report file, use 'files' instead of 'attachments' if using an older version of Airflow
-        dag=dag  # Associate with the DAG
+    # Define the mail task
+    send_email_task = PythonOperator(
+        task_id='send_email_task',
+        python_callable=main_of_send_email_with_attachment,
+        dag=dag,
     )
 
-    
 #Task dependencies
-zip_data_downloader_task >> validation_task >> unzipped_data_uploader_task >> aggregates_creation_task >> mail_task
+zip_data_downloader_task >> validation_task >> unzipped_data_uploader_task >> aggregates_creation_task >> send_email_task
