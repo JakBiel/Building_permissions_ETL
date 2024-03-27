@@ -9,6 +9,7 @@ import requests
 import roman
 from airflow.utils.email import send_email
 from google.cloud import bigquery
+from google.cloud.exceptions import NotFound
 from great_expectations.dataset import PandasDataset
 from great_expectations.render.renderer import ValidationResultsPageRenderer
 from great_expectations.render.view import DefaultJinjaPageView
@@ -70,6 +71,9 @@ def create_roman_set():
     return roman_set
 
 def load_data_from_csv_to_db(file_path,  ti=None, **kwargs):
+
+    create_and_configure_bigquery_db()
+
     """Load data from a CSV file into the database."""
     logging.info("Connecting the database...")
 
@@ -361,3 +365,74 @@ def email_callback():
         """,
         files = ['/opt/airflow/data/validation_results.html']
     )
+
+def create_and_configure_bigquery_db():
+    """
+    Create and configure a BigQuery table with daily partitioning based on the 'data_wplywu_wniosku_do_urzedu' date column.
+    """
+    # Configuration
+    project_id = 'airflow-lab-415614'
+    dataset_id = 'airflow_dataset'
+    table_id = 'reporting_results2020'
+    
+    # Initialize the BigQuery client
+    client = bigquery.Client(project=project_id)
+
+    # Construct references for the dataset and table
+    dataset_ref = client.dataset(dataset_id)
+    table_ref = dataset_ref.table(table_id)
+    
+    # Define table schema
+    schema = [
+        bigquery.SchemaField("id", "INTEGER"),
+        bigquery.SchemaField("numer_ewidencyjny_system", "STRING"),
+        bigquery.SchemaField("numer_ewidencyjny_urzad", "STRING"),
+        bigquery.SchemaField("data_wplywu_wniosku_do_urzedu", "DATE"),
+        bigquery.SchemaField("nazwa_organu", "STRING"),
+        bigquery.SchemaField("wojewodztwo_objekt", "STRING"),
+        bigquery.SchemaField("obiekt_kod_pocztowy", "STRING"),
+        bigquery.SchemaField("miasto", "STRING"),
+        bigquery.SchemaField("terc", "STRING"),
+        bigquery.SchemaField("cecha", "STRING"),
+        bigquery.SchemaField("cecha2", "STRING"),
+        bigquery.SchemaField("ulica", "STRING"),
+        bigquery.SchemaField("ulica_dalej", "STRING"),
+        bigquery.SchemaField("nr_domu", "STRING"),
+        bigquery.SchemaField("kategoria", "STRING"),
+        bigquery.SchemaField("nazwa_zam_budowlanego", "STRING"),
+        bigquery.SchemaField("rodzaj_zam_budowlanego", "STRING"),
+        bigquery.SchemaField("kubatura", "STRING"),
+        bigquery.SchemaField("stan", "STRING"),
+        bigquery.SchemaField("jednostki_numer", "STRING"),
+        bigquery.SchemaField("obreb_numer", "STRING"),
+        bigquery.SchemaField("numer_dzialki", "STRING"),
+        bigquery.SchemaField("numer_arkusza_dzialki", "STRING"),
+        bigquery.SchemaField("nazwisko_projektanta", "STRING"),
+        bigquery.SchemaField("imie_projektanta", "STRING"),
+        bigquery.SchemaField("projektant_numer_uprawnien", "STRING"),
+        bigquery.SchemaField("projektant_pozostali", "STRING")
+    ]
+
+    # Try to create the dataset (if it does not exist)
+    try:
+        client.get_dataset(dataset_ref)
+        print("Dataset already exists.")
+    except NotFound:
+        dataset = bigquery.Dataset(dataset_ref)
+        dataset.location = "EU"
+        client.create_dataset(dataset)
+        print(f"Created dataset {dataset_id}")
+
+    # Try to create the table (if it does not exist)
+    try:
+        client.get_table(table_ref)
+        print("Table already exists.")
+    except NotFound:
+        table = bigquery.Table(table_ref, schema=schema)
+        # Set daily partitioning on 'data_wplywu_wniosku_do_urzedu' column
+        table.time_partitioning = bigquery.TimePartitioning(
+            type_=bigquery.TimePartitioningType.DAY,
+            field="data_wplywu_wniosku_do_urzedu"
+        )
+        table = client.create_table(table)  # Make an API request to create the table
+        print(f"Created table {table_id} with daily partitioning in BigQuery")
