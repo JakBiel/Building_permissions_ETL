@@ -1,9 +1,11 @@
 import logging
 import os
+import shutil
 import sys
 import zipfile
 from datetime import datetime, timedelta
 
+import geopandas as gpd
 import pandas as pd
 import requests
 import roman
@@ -436,3 +438,62 @@ def create_and_configure_bigquery_db():
         )
         table = client.create_table(table)  # Make an API request to create the table
         print(f"Created table {table_id} with daily partitioning in BigQuery")
+
+        table.clustering_fields = ['terc']
+        table = client.create_table(table)  # Make an API request to create the table
+        print(f"Created table {table_id} with daily partitioning and clustering on 'terc' in BigQuery")
+
+    load_shapefile_to_bigquery()    
+
+def load_shapefile_to_bigquery():
+    # Setup logging
+    logging.basicConfig(level=logging.INFO)
+    
+    # URL of the zip file to download
+    url = 'https://www.gis-support.pl/downloads/2022/powiaty.zip'
+    local_zip_path = '/tmp/powiaty.zip'
+    extract_to_folder = '/tmp/powiaty'
+
+    # Downloading the zip file
+    logging.info("Downloading zip file...")
+    response = requests.get(url)
+    with open(local_zip_path, 'wb') as file:
+        file.write(response.content)
+
+    # Extracting the zip file
+    logging.info("Extracting zip file...")
+    with zipfile.ZipFile(local_zip_path, 'r') as zip_ref:
+        zip_ref.extractall(extract_to_folder)
+
+    # Checking if the table exists in BigQuery
+    project_id = 'airflow-lab-415614'
+    client = bigquery.Client(project=project_id)
+    dataset_id = 'airflow_dataset'
+    table_id = 'powiaty'
+    table_ref = client.dataset(dataset_id).table(table_id)
+
+    try:
+        client.get_table(table_ref)
+        logging.info(f"Table {table_id} already exists in BigQuery. No action taken.")
+    except NotFound:
+        shapefile_path = f'{extract_to_folder}/powiaty.shp'
+        gdf = gpd.read_file(shapefile_path)
+        
+        if 'geometry' in gdf.columns:
+            gdf['geometry'] = gdf['geometry'].apply(lambda x: x.wkt)
+            schema = [bigquery.SchemaField(name=column, field_type='STRING') for column in gdf.columns]
+            
+            table = bigquery.Table(table_ref, schema=schema)
+            client.create_table(table)
+            logging.info(f"Created table {table_id} in BigQuery.")
+
+            job = client.load_table_from_dataframe(gdf, table_ref)
+            job.result()
+            logging.info(f"Loaded {job.output_rows} rows into {table_id}.")
+        else:
+            logging.warning("GeoDataFrame does not contain a geometry column.")
+
+    # Cleaning up the downloaded zip file and the extracted folder
+    os.remove(local_zip_path)
+    shutil.rmtree(extract_to_folder)
+    logging.info("Cleaned up downloaded and extracted files.")
