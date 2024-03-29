@@ -7,9 +7,9 @@ from aggregates_python_helpers import (
     absolute_path,
     download_and_unpack_zip,
     email_callback,
-    load_data_from_csv_to_db,
+    load_permissionss_to_bq,
     superior_aggregates_creator,
-    validation,
+    validate_permissions_data,
 )
 from airflow import DAG
 from airflow.operators.email import EmailOperator
@@ -23,34 +23,30 @@ default_args = {
     # 'retry_delay': timedelta(minutes=2),
 }
 
-def main_of_unzipped_data_uploader(ti):
+def main_of_unzipped_data_uploader():
     # Path to the CSV file containing data to be validated
     csv_file_path = 'unpacked_zip_data_files/wynik_zgloszenia_2022_up.csv'
 
-    load_data_from_csv_to_db(csv_file_path, ti)
+    load_permissionss_to_bq(csv_file_path)
 
     logging.info("Data upload and validation completed.")
 
-def main_of_zip_data_downloader(ti):
+def main_of_zip_data_downloader():
     """Main function for ZIP data downloader."""
     url = 'https://wyszukiwarka.gunb.gov.pl/pliki_pobranie/wynik_zgloszenia_2022_up.zip'
     local_zip_path = 'zip_data.zip'
     extract_to_folder = 'unpacked_zip_data_files'
     download_and_unpack_zip(url, local_zip_path, extract_to_folder)
 
-def main_of_validation(ti):
+def main_of_validation():
     csv_file_path = 'unpacked_zip_data_files/wynik_zgloszenia_2022_up.csv'
 
-    validation(csv_file_path)
+    validate_permissions_data(csv_file_path)
 
-def main_of_aggregates_creation(ti):
+def main_of_aggregates_creation():
     """Main function for aggregates creation."""
 
     superior_aggregates_creator()    
-
-def main_of_send_email_with_attachment(ti):
-    
-    email_callback()
 
 # DAG definition
 with DAG(
@@ -89,7 +85,7 @@ with DAG(
     # Define the mail task
     send_email_task = PythonOperator(
         task_id='send_email_task',
-        python_callable=main_of_send_email_with_attachment,
+        python_callable=email_callback,
         dag=dag,
     )
 
