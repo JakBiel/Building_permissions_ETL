@@ -31,7 +31,7 @@ def download_and_unpack_zip(url, local_zip_path, extract_to_folder):
         zip_ref.extractall(extract_to_folder)
     logging.info("The unpacking process has been finished")
 
-def validation(file_path):
+def validate_permissions_data(file_path):
     # Read data from CSV into a pandas DataFrame
     df = pd.read_csv(file_path, delimiter='#', encoding='ISO-8859-2')
     
@@ -40,11 +40,15 @@ def validation(file_path):
     # Convert pandas DataFrame to Great Expectations PandasDataset for validation
     dataset = PandasDataset(df)
 
+    # Preparation of expected values in the "rodzaj_zam_budowlanego" column
+    expected_types = ['budowa nowego/nowych obiektów budowlanych', 'rozbudowa istniejącego/istniejących obiektów budowlanych', 'odbudowa istniejącego/istniejących obiektów budowlanych', 'nadbudowa istniejącego/istniejących obiektów budowlanych']
+
     # Define expectations
     rom_set = create_roman_set()
     dataset.expect_column_values_to_match_regex('data_wplywu_wniosku_do_urzedu', r'^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}$')
     dataset.expect_column_values_to_be_in_set('kategoria', rom_set)
     dataset.expect_column_values_to_match_regex('terc', r'^\d{7}$')
+    dataset.expect_column_distinct_values_to_be_in_set('rodzaj_zam_budowlanego', expected_types)
 
     # Validate and save results
     validation_results = dataset.validate()
@@ -72,7 +76,7 @@ def create_roman_set():
         roman_set.add(roman_number)
     return roman_set
 
-def load_data_from_csv_to_db(file_path,  ti=None, **kwargs):
+def load_permissionss_to_bq(file_path, **kwargs):
 
     create_and_configure_bigquery_db()
 
@@ -141,19 +145,15 @@ def get_first_day_of_previous_month(date_str):
     """Returns the first day of the month before the given date."""
     # Convert the string to datetime type
     current_date = datetime.strptime(date_str, '%Y-%m-%d %H:%M:%S')
-    year = current_date.year
-    month = current_date.month
     
-    # Decrement the month by one
-    if month == 1:  # January
-        month = 12  # December
-        year -= 1  # Previous year
-    else:
-        month -= 1  # Previous month
+    # Subtract one month from the current date
+    previous_month_date = current_date.replace(day=1) - timedelta(days=1)
 
-    # Set day to the first of the month
-    new_date = datetime(year, month, 1)
-    return new_date.strftime('%Y-%m-%d %H:%M:%S')  # Return the new date as a string in the same format
+    # Get the first day of the previous month
+    first_day_of_previous_month = previous_month_date.replace(day=1)
+
+    # Format the result as a string in the same format as the input
+    return first_day_of_previous_month.strftime('%Y-%m-%d %H:%M:%S')
 
 def insert_permissions_to_db(df):
     """Load data from a Pandas DataFrame into the database in batches after filtering out null dates."""
@@ -182,12 +182,6 @@ def insert_permissions_to_db(df):
         end_index = start_index + batch_size
         df_batch = df_filtered.iloc[start_index:end_index]
         
-        #PREVIOUS Version
-        # Load the batch into the database
-        # job = client.load_table_from_dataframe(df_batch, table_id)
-        # job.result()
-
-        #CURRENT Version
         # Load the batch into the database
     
         df_batch['data_wplywu_wniosku_do_urzedu'] = df_batch['data_wplywu_wniosku_do_urzedu'].astype(str)
@@ -241,7 +235,7 @@ def convert_text_to_date(text_date):
         return 
     
 def superior_aggregates_creator():
-
+    # Initialize BigQuery client
     client = bigquery.Client()
 
     # Execute SQL query to select records from the last 3 months
@@ -257,53 +251,39 @@ def superior_aggregates_creator():
     df['data_wplywu_wniosku_do_urzedu'] = pd.to_datetime(df['data_wplywu_wniosku_do_urzedu'], errors='coerce')
     df['terc'] = pd.to_numeric(df['terc'], errors='coerce').fillna(0).astype(int)
 
-
-    # Aggregate creation logic here
-
     # Prepare date-related data
     today = pd.Timestamp(datetime.now())
 
-    # Convert 'data_wplywu_wniosku_do_urzedu' to datetime and filter data for the last 3, 2, and 1 month(s)
+    # Filter data for the last 3, 2, and 1 month(s)
     df_last_3m = df
     df_last_2m = df[df['data_wplywu_wniosku_do_urzedu'] >= today - pd.DateOffset(months=2)]
     df_last_1m = df[df['data_wplywu_wniosku_do_urzedu'] >= today - pd.DateOffset(months=1)]
 
+    # Create aggregates
     aggregate3m = aggregate_creator(df_last_3m, "3m")
     aggregate2m = aggregate_creator(df_last_2m, "2m")
     aggregate1m = aggregate_creator(df_last_1m, "1m")
 
-    summary_aggregate = merge_aggregates(aggregate3m,aggregate2m,aggregate1m)
-
+    # Merge and correct aggregates
+    summary_aggregate = merge_aggregates(aggregate3m, aggregate2m, aggregate1m)
     final_aggregate = correct_aggregates_column_order_plus_injection_date(summary_aggregate)
 
-    path_to_save = '/opt/airflow/desktop/aggregate_result.csv'
-    final_aggregate.to_csv(path_to_save, index=False)
+    # Clean column names to meet BigQuery requirements
+    final_aggregate.columns = [col.replace(' ', '_').replace('/', '_').replace('-', '_') for col in final_aggregate.columns]
 
-    logging.info(f"Aggregate has been saved to: {path_to_save}")
+    # Ensure column names do not start with digits
+    final_aggregate.columns = ['_' + col if col[0].isdigit() else col for col in final_aggregate.columns]
 
-    #Code to load the CSV file into BigQuery
-    dataset_id = 'airflow-lab-415614.airflow_dataset'  # Your dataset name
-    table_id = 'new_aggregate_table'  # Name of the new table in BigQuery
-    table_ref = dataset_id + '.' + table_id
-    
-    client = bigquery.Client()
-    job_config = bigquery.LoadJobConfig(
-        autodetect=True,  # BigQuery will automatically detect the schema of the data.
-        source_format=bigquery.SourceFormat.CSV,
-        skip_leading_rows=1,  # Skip the first row of the file, assuming it contains headers
-        write_disposition=bigquery.WriteDisposition.WRITE_TRUNCATE,  # Existing data in the table will be replaced with each load
-    )
-    
-    with open(path_to_save, "rb") as source_file:
-        load_job = client.load_table_from_file(
-            source_file,
-            table_ref,
-            job_config=job_config,
-        )
-    
-    load_job.result()  # Waits for the loading to complete
+    # Define the table ID for BigQuery
+    dataset_id = 'airflow_dataset'
+    table_id = f"{dataset_id}.new_aggregate_table"
 
-    logging.info(f"Loaded {load_job.output_rows} rows into {table_ref} in BigQuery.")
+    # Directly save the DataFrame to BigQuery
+    final_aggregate.to_gbq(table_id, project_id='airflow-lab-415614', if_exists='replace', progress_bar=True)
+
+    # Log a message to indicate successful save operation
+    logging.info(f"DataFrame has been successfully saved to BigQuery, table: {table_id}.")
+
 
     
 
