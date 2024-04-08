@@ -15,7 +15,6 @@ from google.cloud.exceptions import NotFound
 from great_expectations.dataset import PandasDataset
 from great_expectations.render.renderer import ValidationResultsPageRenderer
 from great_expectations.render.view import DefaultJinjaPageView
-from pandas_gbq import to_gbq
 
 # Use the absolute path if you need to navigate from the current working directory
 absolute_path = '/opt/airflow/data/validation_results.html'
@@ -76,21 +75,16 @@ def create_roman_set():
         roman_set.add(roman_number)
     return roman_set
 
-def load_permissionss_to_bq(file_path, **kwargs):
+def load_permissionss_to_bq(file_path, params, **kwargs):
 
-    create_and_configure_bigquery_db()
+    create_and_configure_bigquery_db(params)
 
-    """Load data from a CSV file into the database."""
-    logging.info("Connecting the database...")
+    """Load data from a CSV file into BigQuery."""
+    table_id = params['table_id']
 
     client = bigquery.Client()
-    table_id = "airflow-lab-415614.airflow_dataset.reporting_results2020"
-
-    query = """
-    SELECT EXISTS(
-        SELECT 1 FROM `airflow-lab-415614.airflow_dataset.reporting_results2020` LIMIT 1
-    )
-    """
+    # Checking if the table already has records
+    query = f"SELECT EXISTS(SELECT 1 FROM `{table_id}` LIMIT 1)"
     query_job = client.query(query) 
     results = query_job.result()
 
@@ -158,7 +152,7 @@ def get_first_day_of_previous_month(date_str):
 def insert_permissions_to_db(df):
     """Load data from a Pandas DataFrame into the database in batches after filtering out null dates."""
 
-    batch_size=1000
+    batch_size=10000
 
     # Establish a BigQuery connection
     client = bigquery.Client()
@@ -175,6 +169,11 @@ def insert_permissions_to_db(df):
 
     # Calculate the number of batches
     num_batches = (len(df_filtered) + batch_size - 1) // batch_size  # Ceiling division
+
+    # Zliczanie unikalnych wartości w kolumnie 'kolumna'
+    liczba_unikalnych = df_filtered['data_wplywu_wniosku_do_urzedu'].nunique()
+    print("Liczba unikalnych wartości:", liczba_unikalnych)
+
 
     # Load filtered data in batches
     for batch_num in range(num_batches):
@@ -234,14 +233,17 @@ def convert_text_to_date(text_date):
         logging.info(f"Unsuccessful conversion in <convert_text_to_date> function")
         return 
     
-def superior_aggregates_creator():
-    # Initialize BigQuery client
+def superior_aggregates_creator(params):
+    """Function to create aggregates."""
+    dataset_id = params['dataset_id']
+    project_id = params['project_id']
+    table_id_for_aggregates = f"{dataset_id}.new_aggregate_table"
+
     client = bigquery.Client()
 
-    # Execute SQL query to select records from the last 3 months
-    query = """
+    query = f"""
     SELECT *
-    FROM `airflow-lab-415614.airflow_dataset.reporting_results2020`
+    FROM `{project_id}.{dataset_id}.reporting_results2020`
     WHERE DATE(TIMESTAMP(data_wplywu_wniosku_do_urzedu)) >= DATE_SUB(CURRENT_DATE(), INTERVAL 3 MONTH);
     """
 
@@ -274,17 +276,11 @@ def superior_aggregates_creator():
     # Ensure column names do not start with digits
     final_aggregate.columns = ['_' + col if col[0].isdigit() else col for col in final_aggregate.columns]
 
-    # Define the table ID for BigQuery
-    dataset_id = 'airflow_dataset'
-    table_id = f"{dataset_id}.new_aggregate_table"
-
     # Directly save the DataFrame to BigQuery
-    final_aggregate.to_gbq(table_id, project_id='airflow-lab-415614', if_exists='replace', progress_bar=True)
+    final_aggregate.to_gbq(table_id_for_aggregates, project_id=project_id, if_exists='replace', progress_bar=True)
 
     # Log a message to indicate successful save operation
-    logging.info(f"DataFrame has been successfully saved to BigQuery, table: {table_id}.")
-
-
+    logging.info(f"DataFrame has been successfully saved to BigQuery, table: {table_id_for_aggregates}.")
     
 
 def aggregate_creator(df, prefix):
@@ -331,7 +327,7 @@ def correct_aggregates_column_order_plus_injection_date(aggregate_0):
 
     return aggregate_ordered
 
-def email_callback():
+def email_callback(params):
     send_email(
         to=[
             'jakbiel1@gmail.com'
@@ -348,14 +344,23 @@ def email_callback():
         files = ['/opt/airflow/data/validation_results.html']
     )
 
-def create_and_configure_bigquery_db():
-    """
-    Create and configure a BigQuery table with daily partitioning based on the 'data_wplywu_wniosku_do_urzedu' date column.
-    """
-    # Configuration
-    project_id = 'airflow-lab-415614'
-    dataset_id = 'airflow_dataset'
-    table_id = 'reporting_results2020'
+def create_and_configure_bigquery_db(params):
+    # Logging the value of dataset_id
+    # Attempting to retrieve 'dataset_id' from params; if not found, defaults to 'Brak dataset_id'
+    dataset_id = params['dataset_id']
+    # Logging the retrieved 'dataset_id' to help verify its correctness
+    logging.info(f"dataset_id: {dataset_id}")
+
+    # Check if the retrieved 'dataset_id' is indeed a string
+    if not isinstance(dataset_id, str):
+        # If not, raise an error specifying the expected type
+        raise ValueError(f"dataset_id should be a string, received: {type(dataset_id)}")
+    
+    # Retrieving 'project_id' from params for further use in BigQuery operations
+    project_id = params['project_id']
+    # Further logic for configuring BigQuery would go here, now with a verified dataset_id
+
+    table_id = params['table_id_name']
     
     # Initialize the BigQuery client
     client = bigquery.Client(project=project_id)
@@ -408,24 +413,25 @@ def create_and_configure_bigquery_db():
     # Try to create the table (if it does not exist)
     try:
         client.get_table(table_ref)
-        print("Table already exists.")
+        logging.info(f"Table {table_id} already exists.")
     except NotFound:
         table = bigquery.Table(table_ref, schema=schema)
-        # Set daily partitioning on 'data_wplywu_wniosku_do_urzedu' column
+        # Set monthly partitioning on 'data_wplywu_wniosku_do_urzedu' column
         table.time_partitioning = bigquery.TimePartitioning(
-            type_=bigquery.TimePartitioningType.DAY,
-            field="data_wplywu_wniosku_do_urzedu"
+            type_="MONTH",
+            field="data_wplywu_wniosku_do_urzedu"  # The field to partition by
         )
-        table = client.create_table(table)  # Make an API request to create the table
-        print(f"Created table {table_id} with daily partitioning in BigQuery")
-
+        # Set clustering fields right before creating the table
         table.clustering_fields = ['terc']
-        table = client.create_table(table)  # Make an API request to create the table
-        print(f"Created table {table_id} with daily partitioning and clustering on 'terc' in BigQuery")
+        # Only create the table once with all configurations set
+        table = client.create_table(table)
+        logging.info(f"Created table {table_id} with monthly partitioning and clustering on 'terc' in BigQuery")
 
-    load_shapefile_to_bigquery()    
 
-def load_shapefile_to_bigquery():
+
+    load_shapefile_to_bigquery(params)    
+
+def load_shapefile_to_bigquery(params):
     # Setup logging
     logging.basicConfig(level=logging.INFO)
     
@@ -446,9 +452,11 @@ def load_shapefile_to_bigquery():
         zip_ref.extractall(extract_to_folder)
 
     # Checking if the table exists in BigQuery
-    project_id = 'airflow-lab-415614'
+        
+    project_id = params['project_id']
+    dataset_id = params['dataset_id']
+
     client = bigquery.Client(project=project_id)
-    dataset_id = 'airflow_dataset'
     table_id = 'powiaty'
     table_ref = client.dataset(dataset_id).table(table_id)
 
