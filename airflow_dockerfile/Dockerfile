@@ -15,4 +15,4 @@ ENV EMAIL_ADDRESS_1=${EMAIL_ADDRESS_1}
 ENV EMAIL_ADDRESS_2=${EMAIL_ADDRESS_2}
 ENV THE_G_PASS=${THE_G_PASS}
 
-RUN pip install pandas sqlalchemy psycopg2-binary great-expectations==0.15.0 roman
+RUN pip install pandas sqlalchemy psycopg2-binary great-expectations==0.15.0 roman geopandas pandas_gbq
