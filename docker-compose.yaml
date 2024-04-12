@@ -140,30 +140,7 @@ services:
       retries: 5
     restart: always
 
-  zip_data_postgres_db: #Container for a database to store downloaded and unpacked .zip data
-      build: ./zip_data_postgres_db
-      volumes:
-          - ./zip_data_postgres_db/data:/var/lib/postgresql/data
-      environment:
-          POSTGRES_USER: ${POSTGRES_USER}
-          POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
-          POSTGRES_DB: ${POSTGRES_DB}
-      ports:
-          - 5432:5432
-
-  # zip_data_downloader_app: #Container for a Python app downloading and unpacking .zip data from the source web page
-  #     depends_on:
-  #         - zip_data_postgres_db
-  #     build: ./zip_data_downloader_app
-  #     restart: on-failure
-  #     environment:
-  #         POSTGRES_USER: ${POSTGRES_USER}
-  #         POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
-  #         POSTGRES_DB: ${POSTGRES_DB}
-
   jupyter:
-      depends_on:
-          - zip_data_postgres_db
       build: ./zip_data_jupyter_notebook
       volumes:
           - ./zip_data_jupyter_notebook/jpdata:/zip_data_jupyter_notebook/jpdata

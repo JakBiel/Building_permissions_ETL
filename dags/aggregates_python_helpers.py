@@ -45,9 +45,14 @@ def validate_permissions_data(file_path, html_path):
 
     # Define expectations
     rom_set = create_roman_set()
+
+    # Checking if the dates in 'data_wplywu_wniosku_do_urzedu' column have the correct format
     dataset.expect_column_values_to_match_regex('data_wplywu_wniosku_do_urzedu', r'^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}$')
+    # Checking if the values in 'kategoria' column are the expected numbers of the roman type
     dataset.expect_column_values_to_be_in_set('kategoria', rom_set)
+    # Checking if the 'terc' column includes the correct type (7 digits) of TERC codes
     dataset.expect_column_values_to_match_regex('terc', r'^\d{7}$')
+    # Checking if the 'rodzaj_zam_budowlanego' column includes all 4 expected types of building construction intention
     dataset.expect_column_distinct_values_to_be_in_set('rodzaj_zam_budowlanego', expected_types)
 
     # Validate and save results
