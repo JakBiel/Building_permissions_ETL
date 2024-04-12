@@ -31,7 +31,7 @@ def download_and_unpack_zip(url, local_zip_path, extract_to_folder):
         zip_ref.extractall(extract_to_folder)
     logging.info("The unpacking process has been finished")
 
-def validate_permissions_data(file_path):
+def validate_permissions_data(file_path, html_path):
     # Read data from CSV into a pandas DataFrame
     df = pd.read_csv(file_path, delimiter='#', encoding='ISO-8859-2')
     
@@ -59,11 +59,8 @@ def validate_permissions_data(file_path):
     #Checking the directory status by logging.info
     logging.info(f"Current working directory: {os.getcwd()}")
 
-    # Convert to the absolute path for HTML output
-    absolute_path_html = '/opt/airflow/data/validation_results.html'
-
     # Save the validation results to an HTML file
-    with open(absolute_path_html, 'w') as html_file:
+    with open(html_path, 'w') as html_file:
         html_file.write(html)
 
 
@@ -81,7 +78,7 @@ def load_permissionss_to_bq(file_path, params, **kwargs):
     create_and_configure_bigquery_db(params)
 
     """Load data from a CSV file into BigQuery."""
-    table_id = params['table_id']
+    table_id = f"{params['project_id']}.{params['dataset_id']}.{params['table_id_name']}"
 
     client = bigquery.Client()
     # Checking if the table already has records
@@ -95,6 +92,8 @@ def load_permissionss_to_bq(file_path, params, **kwargs):
     mode = 'update' if table_has_records else 'full'
     logging.info(f"mode value is {mode}")
 
+    today_date_minus_month = pd.NA
+
     if mode == 'update':
         today_date_before_convertion = kwargs.get('execution_date', datetime.utcnow())
         if isinstance(today_date_before_convertion, datetime):
@@ -107,18 +106,12 @@ def load_permissionss_to_bq(file_path, params, **kwargs):
         if today_date is None or today_date_minus_month is None:
             logging.critical("Critical Error: 'today_date' or 'today_date_minus_month' is None. Exiting program.", file=sys.stderr)
             raise Exception("InvalidDateError: Either 'today_date' or 'today_date_minus_month' has failed to be set properly.")
-    else:
-        today_date = 0
-        today_date_before_convertion = 0
-        today_date_minus_month = 0
-
-    logging.info(f"CAUTION: before the date convertion, <today_date> has a value: {today_date_before_convertion} ")
-    logging.info(f"CAUTION: current value of the <today_date> parameter is {today_date}")
+        
     logging.info(f"CAUTION: current value of the <today_date_minus_month> parameter is {today_date_minus_month}")
 
     filtered_df = filter_data_on_date(file_path, today_date_minus_month)
 
-    insert_permissions_to_db(filtered_df)
+    insert_permissions_to_db(filtered_df, params)
 
 #Especially for Apache Airflow metadata dates convertion
 def convert_iso_to_standard_format(iso_date_str):
@@ -150,15 +143,15 @@ def get_first_day_of_previous_month(date_str):
     # Format the result as a string in the same format as the input
     return first_day_of_previous_month.strftime('%Y-%m-%d %H:%M:%S')
 
-def insert_permissions_to_db(df):
+def insert_permissions_to_db(df, params):
     """Load data from a Pandas DataFrame into the database in batches after filtering out null dates."""
 
     batch_size=10000
 
     # Establish a BigQuery connection
     client = bigquery.Client()
-    table_id = "airflow-lab-415614.airflow_dataset.reporting_results2020"
-    shorter_table_id = "airflow_dataset.reporting_results2020"
+    table_id = f"{params['project_id']}.{params['dataset_id']}.{params['table_id_name']}"
+    shorter_table_id = f"{params['dataset_id']}.{params['table_id_name']}"
 
     table = client.get_table(table_id)
 
@@ -207,7 +200,7 @@ def filter_data_on_date(file_path, min_date_str):
     df = pd.read_csv(file_path, delimiter='#', names=column_names, header=0)
     df['data_wplywu_wniosku_do_urzedu'] = convert_column_to_date(df, 'data_wplywu_wniosku_do_urzedu')
     filtered_df = df
-    if min_date_str != 0:
+    if not pd.isna(min_date_str):
         min_date = convert_text_to_date(min_date_str)      
         filtered_df = df[df['data_wplywu_wniosku_do_urzedu'] > min_date]
     
@@ -329,10 +322,12 @@ def correct_aggregates_column_order_plus_injection_date(aggregate_0):
     return aggregate_ordered
 
 def email_callback(params):
+    recipient_email = os.getenv('EMAIL_ADDRESS_2')
+    if recipient_email is None:
+        raise ValueError("!!! EMAIL_RECIPIENT is not set! The mail cannot be sent !!!")
+
     send_email(
-        to=[
-            'jakbiel1@gmail.com'
-        ],
+        to=[recipient_email],
         subject='ETL Process Report complete',
         html_content = """
         <p>Dear User,</p>
