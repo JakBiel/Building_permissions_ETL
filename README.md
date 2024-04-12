@@ -150,11 +150,11 @@ lab3
 
 ## Example of email attachment with Great Expectations validation report 
 
-![IMG GX_EXMPL](https://github.com/JakBiel/README_img/blob/main/gx_pic.PNG)
+![IMG GX_EXMPL](https://github.com/JakBiel/README_img/blob/main/gx_pic.png)
 
 ## A data sample from the table "reporting_results2020"
 
-![IMG DATA_EXMPL](https://github.com/JakBiel/README_img/blob/main/bq_pic.PNG)
+![IMG DATA_EXMPL](https://github.com/JakBiel/README_img/blob/main/bq_pic.png)
 
 ## Table schema of "reporting_results2020" in BigQuery
 
@@ -174,4 +174,4 @@ No special license issued so far, I present it as a result of my work only.
 
 ## Project status
 
-It is initaly finished (as 05.10.2023). Unknown if it is going to be developed in the future.
+It is initaly finished (as 12.04.2024). Unknown if it is going to be developed in the future.
