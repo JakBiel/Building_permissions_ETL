@@ -116,7 +116,7 @@ localhost:8888
 
 This command will open the container's content that includes csv_analyze.ipynb file with the building permissions table analyze. In order to check the results of the analyze in the browser tab, please click on the "Run" tab of the displayed page and choose the suboption of "Run All Cells"
 
-![IPYNB1](img/jupyter_scr2.PNG)
+![IPYNB1](img/jupyter_scr2.png)
 
 The step above will generate plots with various analysis of the data.
 
@@ -148,7 +148,7 @@ lab3
 
 ## Example of email sent by DAG
 
-![MAIL_EXMPL](img/email_example.PNG)
+![MAIL_EXMPL](img/email_example.png)
 
 ## Example of email attachment with Great Expectations validation report 
 
@@ -160,7 +160,7 @@ lab3
 
 ## Table schema of "reporting_results2020" in BigQuery
 
-![DATA_EXMPL](img/schema_pic.PNG)
+![DATA_EXMPL2](img/schema_pic.png)
 
 ## Contributing
 
