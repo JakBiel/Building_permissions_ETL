@@ -152,7 +152,7 @@ lab3
 
 ## Example of email attachment with Great Expectations validation report 
 
-![GX_EXMPL](img/gx_pic.png)
+![GX_EXMPL](img/gx_pic1.png)
 
 ## A data sample from the table "reporting_results2020"
 

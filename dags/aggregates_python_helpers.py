@@ -33,7 +33,7 @@ def download_and_unpack_zip(url, local_zip_path, extract_to_folder):
 
 def validate_permissions_data(file_path, html_path):
     # Read data from CSV into a pandas DataFrame
-    df = pd.read_csv(file_path, delimiter='#', encoding='ISO-8859-2')
+    df = pd.read_csv(file_path, delimiter='#', encoding='UTF-8')
     
     df['terc'] = df['terc'].apply(lambda x: str(int(x)) if pd.notnull(x) and str(x).replace('.0', '').isdigit() else str(x))
     
@@ -41,7 +41,7 @@ def validate_permissions_data(file_path, html_path):
     dataset = PandasDataset(df)
 
     # Preparation of expected values in the "rodzaj_zam_budowlanego" column
-    expected_types = ['budowa nowego/nowych obiektów budowlanych', 'rozbudowa istniejącego/istniejących obiektów budowlanych', 'odbudowa istniejącego/istniejących obiektów budowlanych', 'nadbudowa istniejącego/istniejących obiektów budowlanych']
+    expected_types = ['budowa nowego/nowych obiektów budowlanych', 'rozbudowa istniejącego/istniejących obiektów budowlanych', 'odbudowa istniejącego/istniejących obiektów budowlanych', 'nadbudowa istniejącego/istniejących obiektów budowlanych', 'wykonanie robót budowlanych innych niż wymienione powyżej']
 
     # Define expectations
     rom_set = create_roman_set()
@@ -467,7 +467,7 @@ def load_shapefile_to_bigquery(params):
     except NotFound:
         shapefile_path = f'{extract_to_folder}/powiaty.shp'
         gdf = gpd.read_file(shapefile_path)
-        gdf = gdf.to_crs(4327)
+        gdf = gdf.to_crs(4326)
         
         if 'geometry' in gdf.columns:
             gdf['geometry'] = gdf['geometry'].apply(lambda x: x.wkt)
