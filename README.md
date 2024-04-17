@@ -30,6 +30,8 @@ Also, as a part of the project, I created related visualisations in Looker Studi
 
 ## Docker containers runned in this project
 
+![Dag tasks](img/dag_tasks.PNG)
+
 - **airflow-webserver-1** - to present a web page that is a GUI to use Apache Airflow
 - **airflow-scheduler-1** - a scheduler of scheduled DAGs in Apache Airflow
 - **airflow-init-1** - to initialize Apache Airflow server
@@ -174,4 +176,4 @@ No special license issued so far, I present it as a result of my work only.
 
 ## Project status
 
-It is initaly finished (as 12.04.2024). Unknown if it is going to be developed in the future.
+It is initaly finished (as 17.04.2024). Unknown if it is going to be developed in the future.
