@@ -10,6 +10,8 @@ This project uses Apache Airflow's directed acyclic graph (or, shortly - DAG) to
 
 The DAG works with the following tasks (in order):
 
+![DAG TASKS](img/dag_tasks.PNG)
+
 1. **zip_data_downloader_task** - this task is responsible for downloading the building permissions data and unzipping it (to the original .csv format).
 2. **validation task** - this task does the validation of the selected columns of the downloaded data using Great Expectations library. There are four goals of the validation which are: 
     - checking if the dates in 'data_wplywu_wniosku_do_urzedu' column have the correct format
@@ -24,13 +26,11 @@ This DAG is scheduled to be executed once per month, on a first day of each mont
 
 Moreover, for this project, I created visualisations basing on the "reporting_results2020" table in Jupyter Notebook. The visualisations include various plots and GIF file showing the changes in the number of building permissions per last 3, 2 and 1 month (the GIF is below)
 
-![IMG VOIVOD_CHANGES321](https://github.com/JakBiel/README_img/blob/main/voivodeships.gif)
+![VOIVOD_CHANGES321](img/voivodeships.gif)
 
 Also, as a part of the project, I created related visualisations in Looker Studio.
 
 ## Docker containers runned in this project
-
-![Dag tasks](img/dag_tasks.PNG)
 
 - **airflow-webserver-1** - to present a web page that is a GUI to use Apache Airflow
 - **airflow-scheduler-1** - a scheduler of scheduled DAGs in Apache Airflow
@@ -116,7 +116,7 @@ localhost:8888
 
 This command will open the container's content that includes csv_analyze.ipynb file with the building permissions table analyze. In order to check the results of the analyze in the browser tab, please click on the "Run" tab of the displayed page and choose the suboption of "Run All Cells"
 
-![IMG IPYNB1](https://github.com/JakBiel/README_img/blob/main/jupyter_scr2.PNG)
+![IPYNB1](img/jupyter_scr2.PNG)
 
 The step above will generate plots with various analysis of the data.
 
@@ -148,19 +148,19 @@ lab3
 
 ## Example of email sent by DAG
 
-![IMG MAIL_EXMPL](https://github.com/JakBiel/README_img/blob/main/email_example.PNG)
+![MAIL_EXMPL](img/email_example.PNG)
 
 ## Example of email attachment with Great Expectations validation report 
 
-![IMG GX_EXMPL](https://github.com/JakBiel/README_img/blob/main/gx_pic.png)
+![GX_EXMPL](img/gx_pic.png)
 
 ## A data sample from the table "reporting_results2020"
 
-![IMG DATA_EXMPL](https://github.com/JakBiel/README_img/blob/main/bq_pic.png)
+![DATA_EXMPL](img/bq_pic.png)
 
 ## Table schema of "reporting_results2020" in BigQuery
 
-![IMG DATA_EXMPL](https://github.com/JakBiel/README_img/blob/main/schema_pic.PNG)
+![DATA_EXMPL](img/schema_pic.PNG)
 
 ## Contributing
 
