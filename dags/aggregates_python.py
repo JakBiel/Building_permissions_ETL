@@ -7,7 +7,7 @@ from aggregates_python_helpers import (
     absolute_path,
     download_and_unpack_zip,
     email_callback,
-    load_permissionss_to_bq,
+    load_permissions_to_bq,
     superior_aggregates_creator,
     validate_permissions_data,
 )
@@ -22,14 +22,6 @@ default_args = {
     # 'retry_delay': timedelta(minutes=2),
 }
 
-def main_of_unzipped_data_uploader(params):
-    # Path to the CSV file containing data to be validated
-    csv_file_path = 'unpacked_zip_data_files/wynik_zgloszenia_2022_up.csv'
-
-    load_permissionss_to_bq(csv_file_path, params)
-
-    logging.info("Data upload and validation completed.")
-
 def main_of_zip_data_downloader(params):
     """Main function for ZIP data downloader."""
     url = 'https://wyszukiwarka.gunb.gov.pl/pliki_pobranie/wynik_zgloszenia_2022_up.zip'
@@ -41,6 +33,15 @@ def main_of_validation(params):
     csv_file_path = 'unpacked_zip_data_files/wynik_zgloszenia_2022_up.csv'
 
     validate_permissions_data(csv_file_path, absolute_path)
+
+def main_of_unzipped_data_uploader(params):
+    # Path to the CSV file containing data to be validated
+    csv_file_path = 'unpacked_zip_data_files/wynik_zgloszenia_2022_up.csv'
+
+    load_permissions_to_bq(csv_file_path, params)
+
+    logging.info("Data upload and validation completed.")
+
 
 def main_of_aggregates_creation(params):
     """Main function for aggregates creation."""
