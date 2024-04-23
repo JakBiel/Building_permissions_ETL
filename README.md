@@ -1,5 +1,7 @@
 # Apache Airflow DAG with building permissions - project
 
+## Table of content
+
 ## Why did I create this project?
 
 This project is a result of my learning and practicing about DAGs in Apache Airflow and visualisations made in Jupyter Notebook or Looker Studio.
@@ -18,13 +20,13 @@ The DAG works with the following tasks (in order):
     - checking if the values in 'kategoria' column are the expected numbers of the roman type
     - checking if the 'terc' column includes the correct type (7 digits) of TERC codes
     - checking if the 'rodzaj_zam_budowlanego' column includes all 4 expected types of building construction intention.
-3. **unzipped_data_uploader_task** - this task uploades the validated data (a table named "reporting_results2020") to a BigQuery database.
+3. **unzipped_data_uploader_task** - this task uploades the validated data (a table named "permissions_results2022") to a BigQuery database.
 4. **aggregates_creation_task** - this task uses the validated data to create a customized aggregates. The aggregates table consists of columns including information about how many building actions were reported to the polish Main Building Supervision Office in the last 3, 2 and 1 month (divided also by building categories types). At the end, the task sends the aggregates table to the BigQuery database.
 5. **send_email_task** - this task sends a reporting email to a certain mail address. It has the validation report from "validation task" (in .html format).
 
 This DAG is scheduled to be executed once per month, on a first day of each month. It does catchups if necessary.
 
-Moreover, for this project, I created visualisations basing on the "reporting_results2020" table in Jupyter Notebook. The visualisations include various plots and GIF file showing the changes in the number of building permissions per last 3, 2 and 1 month (the GIF is below)
+Moreover, for this project, I created visualisations basing on the "permissions_results2022" table in Jupyter Notebook. The visualisations include various plots and GIF file showing the changes in the number of building permissions per last 3, 2 and 1 month (the GIF is below)
 
 ![VOIVOD_CHANGES321](img/voivodeships.gif)
 
@@ -63,30 +65,11 @@ docker-compose.yaml
 README.md
 ```
 
-- Now, if you want to run the project using a new dedicated virtual environment, please type the command below in your terminal (I presume, that you have already installed Python in your global virtual environment). If you want to use your global virtual environment to run this project, please skip these 2 steps below.
-
-```bash
-python -m venv my_new_virtual_environment
-```
-and:
-
-```bash
-.\my_new_virtual_environment\Scripts\activate
-```
-
-- After that, we will need to download and install a few docker images from the internet. Please execute these 3 commands:
+- Now, we will need to download and install a few docker images from the internet. Please execute this command:
 
 
 ```bash
-docker pull jupyter/base-notebook
-```
-```bash
-docker pull python
-```
-```bash
-docker pull postgres
-```
-
+docker-compose pull
 
 
 - Then, type the following command to initialize all the containers that the project includes:
@@ -154,11 +137,11 @@ lab3
 
 ![GX_EXMPL](img/gx_pic1.png)
 
-## A data sample from the table "reporting_results2020"
+## A data sample from the table "permissions_results2022"
 
-![DATA_EXMPL](img/bq_pic.png)
+![DATA_EXMPL](img/bq_pic1.png)
 
-## Table schema of "reporting_results2020" in BigQuery
+## Table schema of "permissions_results2022" in BigQuery
 
 ![DATA_EXMPL2](img/schema_pic.png)
 
@@ -176,4 +159,4 @@ No special license issued so far, I present it as a result of my work only.
 
 ## Project status
 
-It is initaly finished (as 17.04.2024). Unknown if it is going to be developed in the future.
+It is initaly finished (April 2024). Unknown if it is going to be developed in the future.

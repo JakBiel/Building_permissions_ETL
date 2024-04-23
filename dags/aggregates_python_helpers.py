@@ -341,7 +341,7 @@ def superior_aggregates_creator(params):
 
     query = f"""
     SELECT *
-    FROM `{project_id}.{dataset_id}.reporting_results2020`
+    FROM `{project_id}.{dataset_id}.permissions_results2022`
     WHERE DATE(TIMESTAMP(data_wplywu_wniosku_do_urzedu)) >= DATE_SUB(CURRENT_DATE(), INTERVAL 3 MONTH);
     """
 
@@ -445,8 +445,7 @@ def email_callback(params):
     )
 
 def create_and_configure_bigquery_db(params):
-    # Logging the value of dataset_id
-    # Attempting to retrieve 'dataset_id' from params; if not found, defaults to 'Brak dataset_id'
+
     dataset_id = params['dataset_id']
     # Logging the retrieved 'dataset_id' to help verify its correctness
     logging.info(f"dataset_id: {dataset_id}")

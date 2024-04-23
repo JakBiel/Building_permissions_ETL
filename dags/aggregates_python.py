@@ -46,7 +46,7 @@ def main_of_unzipped_data_uploader(params):
 def main_of_aggregates_creation(params):
     """Main function for aggregates creation."""
 
-    superior_aggregates_creator(params)    
+    superior_aggregates_creator(params)
 
 # DAG definition
 with DAG(
@@ -59,7 +59,7 @@ with DAG(
         params={
             'dataset_id': "airflow_dataset",
             'project_id': 'airflow-lab-415614',
-            'table_id_name': 'reporting_results2020',
+            'table_id_name': 'permissions_results2022',
         }
         
 ) as dag:
@@ -75,7 +75,7 @@ with DAG(
         python_callable=main_of_validation,
         dag=dag
     )
-
+    
     unzipped_data_uploader_task = PythonOperator(
         task_id='unzipped_data_uploader',
         python_callable=main_of_unzipped_data_uploader,
