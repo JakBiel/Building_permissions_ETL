@@ -28,7 +28,7 @@ This DAG is scheduled to be executed once per month, on a first day of each mont
 
 Moreover, for this project, I created visualisations basing on the "permissions_results2022" table in Jupyter Notebook. The visualisations include various plots and GIF file showing the changes in the number of building permissions per last 3, 2 and 1 month (the GIF is below)
 
-![VOIVOD_CHANGES321](img/voivodeships.gif)
+![VOIVOD_CHANGES321](img/voivodeships1.gif)
 
 Also, as a part of the project, I created related visualisations in Looker Studio.
 
