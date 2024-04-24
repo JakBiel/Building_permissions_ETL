@@ -50,6 +50,8 @@ Moreover, for this project, I created visualisations basing on the "permissions_
 
 Also, as a part of the project, I created related visualisations in Looker Studio.
 
+![LOOKER GIF](img/looker_gif.gif)
+
 ## Docker containers runned in this project
 
 - **airflow-webserver-1** - to present a web page that is a GUI to use Apache Airflow
