@@ -2,6 +2,24 @@
 
 ## Table of content
 
+- [Apache Airflow DAG with building permissions - project](#apache-airflow-dag-with-building-permissions---project)
+  - [Table of content](#table-of-content)
+  - [Why did I create this project?](#why-did-i-create-this-project)
+  - [What does this project do?](#what-does-this-project-do)
+  - [Docker containers runned in this project](#docker-containers-runned-in-this-project)
+  - [How to run locally?](#how-to-run-locally)
+  - [Opening Apache Airflow server](#opening-apache-airflow-server)
+  - [Opening Jupyter Notebook server](#opening-jupyter-notebook-server)
+  - [Schema of the project - directory tree](#schema-of-the-project---directory-tree)
+  - [Example of email sent by DAG](#example-of-email-sent-by-dag)
+  - [Example of email attachment with Great Expectations validation report](#example-of-email-attachment-with-great-expectations-validation-report)
+  - [A data sample from the table "permissions\_results2022"](#a-data-sample-from-the-table-permissions_results2022)
+  - [Table schema of "permissions\_results2022" in BigQuery](#table-schema-of-permissions_results2022-in-bigquery)
+  - [Contributing](#contributing)
+  - [Authors and acknowledgment](#authors-and-acknowledgment)
+  - [License](#license)
+  - [Project status](#project-status)
+
 ## Why did I create this project?
 
 This project is a result of my learning and practicing about DAGs in Apache Airflow and visualisations made in Jupyter Notebook or Looker Studio.
@@ -159,4 +177,4 @@ No special license issued so far, I present it as a result of my work only.
 
 ## Project status
 
-It is initaly finished (April 2024). Unknown if it is going to be developed in the future.
+It is initaly finished (End of April 2024). Unknown if it is going to be developed in the future.
