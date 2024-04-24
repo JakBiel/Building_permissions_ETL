@@ -7,7 +7,7 @@ from aggregates_python_helpers import (
     absolute_path,
     download_and_unpack_zip,
     email_callback,
-    load_permissionss_to_bq,
+    load_permissions_to_bq,
     superior_aggregates_creator,
     validate_permissions_data,
 )
@@ -22,14 +22,6 @@ default_args = {
     # 'retry_delay': timedelta(minutes=2),
 }
 
-def main_of_unzipped_data_uploader(params):
-    # Path to the CSV file containing data to be validated
-    csv_file_path = 'unpacked_zip_data_files/wynik_zgloszenia_2022_up.csv'
-
-    load_permissionss_to_bq(csv_file_path, params)
-
-    logging.info("Data upload and validation completed.")
-
 def main_of_zip_data_downloader(params):
     """Main function for ZIP data downloader."""
     url = 'https://wyszukiwarka.gunb.gov.pl/pliki_pobranie/wynik_zgloszenia_2022_up.zip'
@@ -42,10 +34,19 @@ def main_of_validation(params):
 
     validate_permissions_data(csv_file_path, absolute_path)
 
+def main_of_unzipped_data_uploader(params):
+    # Path to the CSV file containing data to be validated
+    csv_file_path = 'unpacked_zip_data_files/wynik_zgloszenia_2022_up.csv'
+
+    load_permissions_to_bq(csv_file_path, params)
+
+    logging.info("Data upload and validation completed.")
+
+
 def main_of_aggregates_creation(params):
     """Main function for aggregates creation."""
 
-    superior_aggregates_creator(params)    
+    superior_aggregates_creator(params)
 
 # DAG definition
 with DAG(
@@ -58,7 +59,7 @@ with DAG(
         params={
             'dataset_id': "airflow_dataset",
             'project_id': 'airflow-lab-415614',
-            'table_id_name': 'reporting_results2020',
+            'table_id_name': 'permissions_results2022',
         }
         
 ) as dag:
@@ -74,7 +75,7 @@ with DAG(
         python_callable=main_of_validation,
         dag=dag
     )
-
+    
     unzipped_data_uploader_task = PythonOperator(
         task_id='unzipped_data_uploader',
         python_callable=main_of_unzipped_data_uploader,

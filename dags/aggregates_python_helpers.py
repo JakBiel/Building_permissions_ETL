@@ -33,7 +33,7 @@ def download_and_unpack_zip(url, local_zip_path, extract_to_folder):
 
 def validate_permissions_data(file_path, html_path):
     # Read data from CSV into a pandas DataFrame
-    df = pd.read_csv(file_path, delimiter='#', encoding='ISO-8859-2')
+    df = pd.read_csv(file_path, delimiter='#', encoding='UTF-8')
     
     df['terc'] = df['terc'].apply(lambda x: str(int(x)) if pd.notnull(x) and str(x).replace('.0', '').isdigit() else str(x))
     
@@ -41,13 +41,18 @@ def validate_permissions_data(file_path, html_path):
     dataset = PandasDataset(df)
 
     # Preparation of expected values in the "rodzaj_zam_budowlanego" column
-    expected_types = ['budowa nowego/nowych obiektów budowlanych', 'rozbudowa istniejącego/istniejących obiektów budowlanych', 'odbudowa istniejącego/istniejących obiektów budowlanych', 'nadbudowa istniejącego/istniejących obiektów budowlanych']
+    expected_types = ['budowa nowego/nowych obiektów budowlanych', 'rozbudowa istniejącego/istniejących obiektów budowlanych', 'odbudowa istniejącego/istniejących obiektów budowlanych', 'nadbudowa istniejącego/istniejących obiektów budowlanych', 'wykonanie robót budowlanych innych niż wymienione powyżej']
 
     # Define expectations
     rom_set = create_roman_set()
+
+    # Checking if the dates in 'data_wplywu_wniosku_do_urzedu' column have the correct format
     dataset.expect_column_values_to_match_regex('data_wplywu_wniosku_do_urzedu', r'^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}$')
+    # Checking if the values in 'kategoria' column are the expected numbers of the roman type
     dataset.expect_column_values_to_be_in_set('kategoria', rom_set)
-    dataset.expect_column_values_to_match_regex('terc', r'^\d{7}$')
+    # Checking if the 'terc' column includes the correct type (6 or 7 digits) of TERC codes; test failes when >15% records are invalid
+    dataset.expect_column_values_to_match_regex('terc', r'^\d{6,7}$', mostly=0.85)
+    # Checking if the 'rodzaj_zam_budowlanego' column includes all 4 expected types of building construction intention
     dataset.expect_column_distinct_values_to_be_in_set('rodzaj_zam_budowlanego', expected_types)
 
     # Validate and save results
@@ -73,9 +78,9 @@ def create_roman_set():
         roman_set.add(roman_number)
     return roman_set
 
-def load_permissionss_to_bq(file_path, params, **kwargs):
+def load_permissions_to_bq(file_path, params, **kwargs):
 
-    create_and_configure_bigquery_db(params)
+    gdf_powiaty = create_and_configure_bigquery_db(params)
 
     """Load data from a CSV file into BigQuery."""
     table_id = f"{params['project_id']}.{params['dataset_id']}.{params['table_id_name']}"
@@ -111,7 +116,9 @@ def load_permissionss_to_bq(file_path, params, **kwargs):
 
     filtered_df = filter_data_on_date(file_path, today_date_minus_month)
 
-    insert_permissions_to_db(filtered_df, params)
+    corrected_data_df = data_correction_on_invalid_terc_codes(filtered_df, gdf_powiaty)
+
+    insert_permissions_to_db(corrected_data_df, params)
 
 #Especially for Apache Airflow metadata dates convertion
 def convert_iso_to_standard_format(iso_date_str):
@@ -164,9 +171,9 @@ def insert_permissions_to_db(df, params):
     # Calculate the number of batches
     num_batches = (len(df_filtered) + batch_size - 1) // batch_size  # Ceiling division
 
-    # Zliczanie unikalnych wartości w kolumnie 'kolumna'
+    # Counting the unique values in the column 'data_wplywu_wniosku_do_urzedu'
     liczba_unikalnych = df_filtered['data_wplywu_wniosku_do_urzedu'].nunique()
-    print("Liczba unikalnych wartości:", liczba_unikalnych)
+    logging.info(f"Number of unique values: {liczba_unikalnych}")
 
 
     # Load filtered data in batches
@@ -203,8 +210,105 @@ def filter_data_on_date(file_path, min_date_str):
     if not pd.isna(min_date_str):
         min_date = convert_text_to_date(min_date_str)      
         filtered_df = df[df['data_wplywu_wniosku_do_urzedu'] > min_date]
-    
+        logging.info("There was a filtration of data by dates")
+    else:
+        logging.info("There was NO filtration of data by dates")
+
     return filtered_df
+
+def data_correction_on_invalid_terc_codes(df1, gdf1):
+    df1['terc'] = df1['terc'].apply(lambda x: str(int(x)) if pd.notnull(x) and str(x).replace('.0', '').isdigit() else str(x))
+
+    new_columns = df1.apply(assign_terc_and_validate, args=(gdf1,), axis=1)
+
+    df1['terc'] = new_columns['terc']
+    df1['untypical'] = new_columns['untypical']
+
+    general_initial_rows_number = len(df1)
+    generally_unknown_terc_codes_number = len(df1.loc[df1['untypical'] == 'Unknown'])
+    generally_unknown_terc_codes_number2 = len(df1.loc[df1['untypical'] == 'Unknown2'])
+    generally_unknown_terc_codes_number3 = len(df1.loc[df1['untypical'] == 'Unknown3'])
+    correct_terc_codes = general_initial_rows_number - generally_unknown_terc_codes_number - generally_unknown_terc_codes_number2 -  generally_unknown_terc_codes_number3
+
+    logging.info(f"Number of all rows in the Dataframe before terc codes correction: {general_initial_rows_number}")
+    logging.info(f"Number of rows with 'untypical' value 'Unknown': {generally_unknown_terc_codes_number}")
+    logging.info(f"Number of rows with 'untypical' value 'Unknown2': {generally_unknown_terc_codes_number2}")
+    logging.info(f"Number of rows with 'untypical' value 'Unknown3': {generally_unknown_terc_codes_number3}")
+
+    logging.info(f"Number of correct powiat records (after data correction): {correct_terc_codes}")
+    logging.info(f"Percentage of invalid records to be removed in the next steps: {round((general_initial_rows_number - correct_terc_codes)/general_initial_rows_number * 100, 2)}%")
+
+    df1 = df1[df1['untypical'] != 'Unknown']
+    df1 = df1[df1['untypical'] != 'Unknown2']
+    df1 = df1[df1['untypical'] != 'Unknown3']
+
+    logging.info(f"Invalid record are removed")
+
+    # Removing column "untypical" that is no longer needed in the df1 after the logging messages above and removing unvalidated records
+    df1 = df1.drop('untypical', axis=1)
+
+    # Cleaning up the downloaded zip file and the extracted folder with <powiaty.shp> data as it is no longer needed.
+    local_zip_path = '/tmp/powiaty.zip'
+    extract_to_folder = '/tmp/powiaty'
+
+    os.remove(local_zip_path)
+    shutil.rmtree(extract_to_folder)
+    logging.info("Cleaned up downloaded and extracted files with <powiaty.shp> data as it is no longer needed")
+
+    return df1
+
+def assign_terc_and_validate(row, gdf1):
+    # Dictionary with mappings of voivodeship codes to voivodeship names
+    voivodeships = {
+        '02': 'Lower Silesian',
+        '04': 'Kuyavian-Pomeranian',
+        '06': 'Lublin',
+        '08': 'Lubusz',
+        '10': 'Lodz',
+        '12': 'Lower Poland',
+        '14': 'Masovian',
+        '16': 'Opole',
+        '18': 'Podkarpackie',
+        '20': 'Podlaskie',
+        '22': 'Pomeranian',
+        '24': 'Silesian',
+        '26': 'Swietokrzyskie',
+        '28': 'Warmian-Masurian',
+        '30': 'Greater Poland',
+        '32': 'West Pomeranian',
+    }
+
+    terc_code = row['terc']
+    untypical = None  # a new variable for new statuses like 'Unknown' or 'Unknown2'
+    if not terc_code or pd.isnull(terc_code) or terc_code == 'nan':  # If terc code is empty
+        miasto = row['miasto']
+        if pd.notnull(miasto) and miasto != 'nan':
+            matching_rows = gdf1[gdf1['JPT_NAZWA_'].str.contains(miasto, case=False, na=False)]
+        else:
+            matching_rows = pd.DataFrame()
+        
+        if not matching_rows.empty:
+            matching_row = matching_rows.iloc[0]
+            terc_code = matching_row['JPT_KOD_JE']
+            untypical = 'Matched'
+        else:
+            terc_code = 'Unknown'
+            untypical = 'Unknown'
+
+    if len(str(terc_code)) == 7 and str(terc_code).isdigit(): #checking if terc_code is of a typical terc_code type
+        if terc_code[:2] not in voivodeships.keys():
+            untypical = 'Unknown2' 
+    elif len(str(terc_code)) == 6 and str(terc_code).isdigit():  # checking if the terc_code consists of 6 digits and is a number so it could be fixed with setting '0' at the beginning
+        terc_code = '0' + str(terc_code) 
+    elif len(str(terc_code)) == 4 and str(terc_code).isdigit() and untypical == 'Matched':
+        pass
+    elif untypical == 'Unknown':
+        pass
+    else:
+        untypical = 'Unknown3'
+
+    
+    return pd.Series({'terc': terc_code, 'untypical': untypical})
 
 def convert_column_to_date(df, column_name):
     converted = pd.to_datetime(df[column_name], format='%Y-%m-%d %H:%M:%S', errors='coerce')
@@ -237,7 +341,7 @@ def superior_aggregates_creator(params):
 
     query = f"""
     SELECT *
-    FROM `{project_id}.{dataset_id}.reporting_results2020`
+    FROM `{project_id}.{dataset_id}.permissions_results2022`
     WHERE DATE(TIMESTAMP(data_wplywu_wniosku_do_urzedu)) >= DATE_SUB(CURRENT_DATE(), INTERVAL 3 MONTH);
     """
 
@@ -341,8 +445,7 @@ def email_callback(params):
     )
 
 def create_and_configure_bigquery_db(params):
-    # Logging the value of dataset_id
-    # Attempting to retrieve 'dataset_id' from params; if not found, defaults to 'Brak dataset_id'
+
     dataset_id = params['dataset_id']
     # Logging the retrieved 'dataset_id' to help verify its correctness
     logging.info(f"dataset_id: {dataset_id}")
@@ -399,12 +502,12 @@ def create_and_configure_bigquery_db(params):
     # Try to create the dataset (if it does not exist)
     try:
         client.get_dataset(dataset_ref)
-        print("Dataset already exists.")
+        logging.info("Dataset already exists.")
     except NotFound:
         dataset = bigquery.Dataset(dataset_ref)
         dataset.location = "EU"
         client.create_dataset(dataset)
-        print(f"Created dataset {dataset_id}")
+        logging.info(f"Created dataset {dataset_id}")
 
     # Try to create the table (if it does not exist)
     try:
@@ -424,8 +527,9 @@ def create_and_configure_bigquery_db(params):
         logging.info(f"Created table {table_id} with monthly partitioning and clustering on 'terc' in BigQuery")
 
 
+    gdf_file1 = load_shapefile_to_bigquery(params)    
 
-    load_shapefile_to_bigquery(params)    
+    return gdf_file1
 
 def load_shapefile_to_bigquery(params):
     # Setup logging
@@ -456,28 +560,29 @@ def load_shapefile_to_bigquery(params):
     table_id = 'powiaty'
     table_ref = client.dataset(dataset_id).table(table_id)
 
+
+    # Creation of GeoDataFrame "gdf" with powiaty.shp data
+    shapefile_path = f'{extract_to_folder}/powiaty.shp'
+    gdf = gpd.read_file(shapefile_path)
+    gdf = gdf.to_crs(4326)
+    if 'geometry' in gdf.columns:
+        gdf['geometry'] = gdf['geometry'].apply(lambda x: x.wkt)
+        schema = [bigquery.SchemaField(name=column, field_type='STRING') for column in gdf.columns]
+    else:
+        logging.warning("GeoDataFrame does not contain a geometry column.")
+
+
     try:
         client.get_table(table_ref)
         logging.info(f"Table {table_id} already exists in BigQuery. No action taken.")
+    # If table not found in BigQuery, the "gdf" is sent to BigQuery as a new table
     except NotFound:
-        shapefile_path = f'{extract_to_folder}/powiaty.shp'
-        gdf = gpd.read_file(shapefile_path)
+        table = bigquery.Table(table_ref, schema=schema)
+        client.create_table(table)
+        logging.info(f"Created table {table_id} in BigQuery.")
         
-        if 'geometry' in gdf.columns:
-            gdf['geometry'] = gdf['geometry'].apply(lambda x: x.wkt)
-            schema = [bigquery.SchemaField(name=column, field_type='STRING') for column in gdf.columns]
-            
-            table = bigquery.Table(table_ref, schema=schema)
-            client.create_table(table)
-            logging.info(f"Created table {table_id} in BigQuery.")
+        job = client.load_table_from_dataframe(gdf, table_ref)
+        job.result()
+        logging.info(f"Loaded {job.output_rows} rows into {table_id}.")
 
-            job = client.load_table_from_dataframe(gdf, table_ref)
-            job.result()
-            logging.info(f"Loaded {job.output_rows} rows into {table_id}.")
-        else:
-            logging.warning("GeoDataFrame does not contain a geometry column.")
-
-    # Cleaning up the downloaded zip file and the extracted folder
-    os.remove(local_zip_path)
-    shutil.rmtree(extract_to_folder)
-    logging.info("Cleaned up downloaded and extracted files.")
+    return gdf
