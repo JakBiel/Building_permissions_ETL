@@ -280,20 +280,27 @@ def assign_terc_and_validate(row, gdf1):
 
     terc_code = row['terc']
     untypical = None  # a new variable for new statuses like 'Unknown' or 'Unknown2'
+    jednostki_numer = row['jednostki_numer']
+
     if not terc_code or pd.isnull(terc_code) or terc_code == 'nan':  # If terc code is empty
-        miasto = row['miasto']
-        if pd.notnull(miasto) and miasto != 'nan':
-            matching_rows = gdf1[gdf1['JPT_NAZWA_'].str.contains(miasto, case=False, na=False)]
-        else:
-            matching_rows = pd.DataFrame()
-        
-        if not matching_rows.empty:
-            matching_row = matching_rows.iloc[0]
-            terc_code = matching_row['JPT_KOD_JE']
+        jednostki_numer = row['jednostki_numer']
+        if pd.notnull(jednostki_numer) and jednostki_numer != 'nan':
+            terc_code = jednostki_numer[:4]
             untypical = 'Matched'
         else:
-            terc_code = 'Unknown'
-            untypical = 'Unknown'
+            miasto = row['miasto']
+            if pd.notnull(miasto) and miasto != 'nan':
+                matching_rows = gdf1[gdf1['JPT_NAZWA_'].str.contains(miasto, case=False, na=False)]
+            else:
+                matching_rows = pd.DataFrame()
+            
+            if not matching_rows.empty:
+                matching_row = matching_rows.iloc[0]
+                terc_code = matching_row['JPT_KOD_JE']
+                untypical = 'Matched'
+            else:
+                terc_code = 'Unknown'
+                untypical = 'Unknown'
 
     if len(str(terc_code)) == 7 and str(terc_code).isdigit(): #checking if terc_code is of a typical terc_code type
         if terc_code[:2] not in voivodeships.keys():
