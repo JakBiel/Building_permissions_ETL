@@ -307,6 +307,8 @@ def assign_terc_and_validate(row, gdf1):
             untypical = 'Unknown2' 
     elif len(str(terc_code)) == 6 and str(terc_code).isdigit():  # checking if the terc_code consists of 6 digits and is a number so it could be fixed with setting '0' at the beginning
         terc_code = '0' + str(terc_code) 
+        if terc_code[:2] not in voivodeships.keys():
+            untypical = 'Unknown2'
     elif len(str(terc_code)) == 4 and str(terc_code).isdigit() and untypical == 'Matched':
         pass
     elif untypical == 'Unknown':
@@ -356,7 +358,9 @@ def superior_aggregates_creator(params):
     df = query_job.to_dataframe()
 
     df['data_wplywu_wniosku_do_urzedu'] = pd.to_datetime(df['data_wplywu_wniosku_do_urzedu'], errors='coerce')
-    df['terc'] = pd.to_numeric(df['terc'], errors='coerce').fillna(0).astype(int)
+    #df['terc'] = pd.to_numeric(df['terc'], errors='coerce').fillna(0).astype(int)
+    df['terc'] = df['terc'].str.slice(0, 4)
+
 
     # Prepare date-related data
     today = pd.Timestamp(datetime.now())
@@ -374,6 +378,17 @@ def superior_aggregates_creator(params):
     # Merge and correct aggregates
     summary_aggregate = merge_aggregates(aggregate3m, aggregate2m, aggregate1m)
     final_aggregate = correct_aggregates_column_order_plus_injection_date(summary_aggregate)
+
+    #Temporary download of powiaty list for additional validation of the final aggregate
+    query_powiaty = f"""
+    SELECT JPT_KOD_JE
+    FROM `{project_id}.{dataset_id}.powiaty`;
+    """
+    query_job_powiaty = client.query(query_powiaty)
+    powiaty_df = query_job_powiaty.to_dataframe()
+    
+    final_aggregate_after_removals = removing_false_records_from_aggregate(final_aggregate,powiaty_df)
+    final_aggregate = adding_empty_records_for_powiats_with_zero_permissions(final_aggregate_after_removals, powiaty_df)
 
     # Clean column names to meet BigQuery requirements
     final_aggregate.columns = [col.replace(' ', '_').replace('/', '_').replace('-', '_') for col in final_aggregate.columns]
@@ -431,6 +446,67 @@ def correct_aggregates_column_order_plus_injection_date(aggregate_0):
     aggregate_ordered = aggregate_ordered.rename(columns={'terc': 'unit_id'})
 
     return aggregate_ordered
+
+def removing_false_records_from_aggregate(final_aggregate, powiaty_df):
+    # Merge final_aggregate with powiaty_df on 'unit_id' and 'JPT_KOD_JE'
+    merged_df = final_aggregate.merge(powiaty_df, how='left', left_on='unit_id', right_on='JPT_KOD_JE')
+    
+    # Select rows where 'JPT_KOD_JE' is null, indicating no match was found
+    false_records = merged_df[merged_df['JPT_KOD_JE'].isnull()]
+    
+    # Log the number of false records
+    logging.info(f"Number of false records to be removed from the final aggregate: {len(false_records)}")
+    
+    # Remove false records from final_aggregate
+    final_aggregate_cleaned = final_aggregate[~final_aggregate['unit_id'].isin(false_records['unit_id'])]
+    
+    # Return the cleaned final_aggregate DataFrame
+    return final_aggregate_cleaned
+
+def adding_empty_records_for_powiats_with_zero_permissions(final_aggregate_after_removals1, powiaty_df1):
+    """
+    Add empty records for powiats with zero permissions.
+
+    Args:
+    - final_aggregate_after_removals1: DataFrame containing the final aggregate after false records removal.
+    - powiaty_df1: DataFrame containing powiaty data.
+
+    Returns:
+    - DataFrame: Final aggregate DataFrame with empty records added for powiats with zero permissions.
+    """
+    # Merge final_aggregate_after_removals1 with powiaty_df1 on 'unit_id' and 'JPT_KOD_JE'
+    merged_df = final_aggregate_after_removals1.merge(powiaty_df1, how='right', left_on='unit_id', right_on='JPT_KOD_JE')
+    
+    # Select rows where 'unit_id' is null, indicating no match was found
+    no_permission_powiats = merged_df[merged_df['unit_id'].isnull()]
+    
+    # Get column names and data types from merged_df
+    columns_and_types = merged_df.dtypes.to_dict()
+    
+    # Create empty records DataFrame with the same schema as merged_df
+    empty_records = pd.DataFrame(columns=columns_and_types.keys())
+    
+    # Fill empty_records DataFrame with zeros
+    for column in empty_records.columns:
+        if column == 'unit_id':
+            empty_records['unit_id'] = no_permission_powiats['JPT_KOD_JE']
+        elif column == 'injection_date':
+            empty_records['injection_date'] = datetime.utcnow().strftime('%Y-%m-%d %H:%M:%S.%f')[:-3] + ' UTC'
+        else:
+            empty_records[column] = 0
+    
+    # Concatenate empty records with final_aggregate_after_removals1
+    final_aggregate_with_empty = pd.concat([final_aggregate_after_removals1, empty_records], ignore_index=True)
+    
+    # Sort final_aggregate_with_empty by 'unit_id' column
+    final_aggregate_with_empty.sort_values(by='unit_id', inplace=True)
+
+    # Remove column 'JPT_KOD_JE'
+    final_aggregate_with_empty.drop(columns=['JPT_KOD_JE'], inplace=True, errors='ignore')
+
+    return final_aggregate_with_empty
+
+
 
 def email_callback(params):
     recipient_email = os.getenv('EMAIL_ADDRESS_2')
