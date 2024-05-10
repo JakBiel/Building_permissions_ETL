@@ -375,18 +375,15 @@ def superior_aggregates_creator(params):
     aggregate1m = aggregate_creator(df_last_1m, "1m")
 
     # Merge and correct aggregates
-    print("Before summary_aggregate")
     summary_aggregate = merge_aggregates(aggregate3m, aggregate2m, aggregate1m)
-    print("Before final_aggregate")
     final_aggregate = correct_aggregates_column_order_plus_injection_date(summary_aggregate)
 
-    print("Before query_powiaty creation")
     #Temporary download of powiaty list for additional validation of the final aggregate
     query_powiaty = f"""
     SELECT JPT_KOD_JE
     FROM `{project_id}.{dataset_id}.powiaty`;
     """
-    print("Before query_job_powiaty")
+
     query_job_powiaty = client.query(query_powiaty)
     powiaty_df = query_job_powiaty.to_dataframe()
     
@@ -423,7 +420,7 @@ def aggregate_creator(df, prefix):
         aggregate.columns = [f"{col}_{prefix}" if col != 'terc' else col for col in aggregate.columns]
 
     shorter_aggregate_column_names(aggregate)
-    # deromanize_categories_numbers(aggregate)
+    deromanize_categories_numbers(aggregate)
     
     return aggregate
 
@@ -459,50 +456,44 @@ def shorter_aggregate_column_names(aggregate):
 
     return aggregate
 
-# def deromanize_categories_numbers(aggregate):
-#     """Replace Roman numerals between underscores with Arabic numerals prefixed by 'kat_'."""
-#     for index in range(len(aggregate.columns)):
-#         col_name = aggregate.columns[index]
-#         print(f"Processing column: {col_name}")
+def deromanize_categories_numbers(aggregate):
+    """Replace Roman numerals between underscores with Arabic numerals prefixed by 'kat_'."""
+    for index in range(len(aggregate.columns)):
+        col_name = aggregate.columns[index]
 
-#         # Split the column name by underscores
-#         parts = col_name.split('_')
-#         if len(parts) >= 3:
-#             try:
-#                 roman_numeral = parts[1]
-#                 arabic_number = str(roman.fromRoman(roman_numeral))
-#                 parts[1] = f"kat_{arabic_number}"
-#                 aggregate.columns.values[index] = '_'.join(parts)
-#                 print(f"Converted column: {aggregate.columns.values[index]}")
-#             except roman.InvalidRomanNumeralError:
-#                 print(f"Invalid Roman numeral: {roman_numeral}, in column: {col_name}")
-#                 continue
+        # Split the column name by underscores
+        parts = col_name.split('_')
+        if len(parts) >= 3:
+            try:
+                roman_numeral = parts[1]
+                arabic_number = str(roman.fromRoman(roman_numeral))
+                parts[1] = f"kat_{arabic_number}"
+                aggregate.columns.values[index] = '_'.join(parts)
+            except roman.InvalidRomanNumeralError:
+                continue
 
-#     return aggregate
+    return aggregate
 
 def merge_aggregates(aggregate3m, aggregate2m, aggregate1m):
+    """Merge three aggregates on 'terc' using join."""
+    
+    # Set index 'terc' for the first two aggregates
+    aggregate3m.set_index('terc', inplace=True)
+    aggregate2m.set_index('terc', inplace=True)
 
-    print("Before first merge")
-    print("Nazwy kolumn dla aggregate3m:")
-    print(aggregate3m.columns)
+    # Join the first two aggregates on the 'terc' index
+    merged_aggregate = aggregate3m.join(aggregate2m, how='outer').reset_index()
 
-    print("\nNazwy kolumn dla aggregate2m:")
-    print(aggregate2m.columns)
+    # Join the result with the third aggregate
+    merged_aggregate = merged_aggregate.set_index('terc').join(aggregate1m.set_index('terc'), how='outer').reset_index()
 
-    merged_aggregate = pd.merge(aggregate3m, aggregate2m, on='terc', how='outer', validate='one_to_one')
-
-    print("Before second merge")
-    merged_aggregate = pd.merge(merged_aggregate, aggregate1m, on='terc', how='outer')
-
-    print("Before loop")
+    # Replace NaN values with zeros and convert to int for numeric columns
     for col in merged_aggregate.columns:
-        print("Before something in loop")
         if col not in ['terc', 'injection_date'] and merged_aggregate[col].dtype == float:
-            print("Before fillna")
             merged_aggregate[col] = merged_aggregate[col].fillna(0).astype(int)
 
-    print("Before return in merge")
     return merged_aggregate
+
 
 def correct_aggregates_column_order_plus_injection_date(aggregate_0):
 
