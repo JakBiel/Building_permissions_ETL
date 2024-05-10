@@ -358,7 +358,6 @@ def superior_aggregates_creator(params):
     df = query_job.to_dataframe()
 
     df['data_wplywu_wniosku_do_urzedu'] = pd.to_datetime(df['data_wplywu_wniosku_do_urzedu'], errors='coerce')
-    #df['terc'] = pd.to_numeric(df['terc'], errors='coerce').fillna(0).astype(int)
     df['terc'] = df['terc'].str.slice(0, 4)
 
 
@@ -376,14 +375,18 @@ def superior_aggregates_creator(params):
     aggregate1m = aggregate_creator(df_last_1m, "1m")
 
     # Merge and correct aggregates
+    print("Before summary_aggregate")
     summary_aggregate = merge_aggregates(aggregate3m, aggregate2m, aggregate1m)
+    print("Before final_aggregate")
     final_aggregate = correct_aggregates_column_order_plus_injection_date(summary_aggregate)
 
+    print("Before query_powiaty creation")
     #Temporary download of powiaty list for additional validation of the final aggregate
     query_powiaty = f"""
     SELECT JPT_KOD_JE
     FROM `{project_id}.{dataset_id}.powiaty`;
     """
+    print("Before query_job_powiaty")
     query_job_powiaty = client.query(query_powiaty)
     powiaty_df = query_job_powiaty.to_dataframe()
     
@@ -397,39 +400,108 @@ def superior_aggregates_creator(params):
     final_aggregate.columns = ['_' + col if col[0].isdigit() else col for col in final_aggregate.columns]
 
     # Directly save the DataFrame to BigQuery
-    final_aggregate.to_gbq(table_id_for_aggregates, project_id=project_id, if_exists='replace', progress_bar=True)
+    final_aggregate.to_gbq(table_id_for_aggregates, project_id=project_id, if_exists='append', progress_bar=True)
 
     # Log a message to indicate successful save operation
     logging.info(f"DataFrame has been successfully saved to BigQuery, table: {table_id_for_aggregates}.")
     
 
 def aggregate_creator(df, prefix):
-    aggregate = pd.pivot_table(df, index=['terc'], columns=['kategoria', 'rodzaj_zam_budowlanego'], 
+    aggregate = pd.pivot_table(df, index=['terc'], columns=['rodzaj_zam_budowlanego', 'kategoria'], 
                                aggfunc='size', fill_value=0)
-    
+
     # Ensure 'terc' becomes a column if it's part of the index
     if 'terc' not in aggregate.columns:
         aggregate.reset_index(inplace=True)
 
     # Modify column names except for 'terc'
     if isinstance(aggregate.columns, pd.MultiIndex):
-        # Flatten MultiIndex if necessary and prepend prefix
-        aggregate.columns = [f"{prefix}_{'_'.join(col).rstrip('_')}" if col[0] != 'terc' else col[0] for col in aggregate.columns.values]
+        # Flatten MultiIndex if necessary and append prefix
+        aggregate.columns = [f"{'_'.join(col).rstrip('_')}_{prefix}" if col[0] != 'terc' else col[0] for col in aggregate.columns.values]
     else:
-        # Prepend prefix to column names except for 'terc'
-        aggregate.columns = [f"{prefix}_{col}" if col != 'terc' else col for col in aggregate.columns]
+        # Append prefix to column names except for 'terc'
+        aggregate.columns = [f"{col}_{prefix}" if col != 'terc' else col for col in aggregate.columns]
+
+    shorter_aggregate_column_names(aggregate)
+    # deromanize_categories_numbers(aggregate)
+    
+    return aggregate
+
+def shorter_aggregate_column_names(aggregate):
+    """Modify column names in the aggregate DataFrame in place."""
+    
+    # Define the prefixes to match
+    prefixes = ['budo', 'rozb', 'odbu', 'nadb']
+
+    # Initialize list to keep track of columns to drop
+    columns_to_drop = []
+
+    # Iterate over each column by its index and name
+    for index, col in enumerate(aggregate.columns):
+        # Check if the column starts with any of the prefixes
+        if any(col.startswith(prefix) for prefix in prefixes):
+            # Extract the first word (prefix) and keep the content after the first underscore
+            first_word = col.split(' ')[0]
+            suffix_index = col.find('_')
+            if suffix_index != -1:
+                # Directly modify the column name in the DataFrame
+                new_name = f"{first_word}{col[suffix_index:]}"
+                aggregate.columns.values[index] = new_name
+        elif col.startswith('terc'):
+            # Keep the column unchanged if it starts with 'terc'
+            continue
+        else:
+            # Mark the column for removal if it doesn't meet the criteria
+            columns_to_drop.append(col)
+
+    # Remove columns that don't meet the criteria
+    aggregate.drop(columns=columns_to_drop, inplace=True)
 
     return aggregate
 
+# def deromanize_categories_numbers(aggregate):
+#     """Replace Roman numerals between underscores with Arabic numerals prefixed by 'kat_'."""
+#     for index in range(len(aggregate.columns)):
+#         col_name = aggregate.columns[index]
+#         print(f"Processing column: {col_name}")
+
+#         # Split the column name by underscores
+#         parts = col_name.split('_')
+#         if len(parts) >= 3:
+#             try:
+#                 roman_numeral = parts[1]
+#                 arabic_number = str(roman.fromRoman(roman_numeral))
+#                 parts[1] = f"kat_{arabic_number}"
+#                 aggregate.columns.values[index] = '_'.join(parts)
+#                 print(f"Converted column: {aggregate.columns.values[index]}")
+#             except roman.InvalidRomanNumeralError:
+#                 print(f"Invalid Roman numeral: {roman_numeral}, in column: {col_name}")
+#                 continue
+
+#     return aggregate
+
 def merge_aggregates(aggregate3m, aggregate2m, aggregate1m):
 
-    merged_aggregate = pd.merge(aggregate3m, aggregate2m, on='terc', how='outer', suffixes=('_3m', '_2m'))
+    print("Before first merge")
+    print("Nazwy kolumn dla aggregate3m:")
+    print(aggregate3m.columns)
+
+    print("\nNazwy kolumn dla aggregate2m:")
+    print(aggregate2m.columns)
+
+    merged_aggregate = pd.merge(aggregate3m, aggregate2m, on='terc', how='outer', validate='one_to_one')
+
+    print("Before second merge")
     merged_aggregate = pd.merge(merged_aggregate, aggregate1m, on='terc', how='outer')
 
+    print("Before loop")
     for col in merged_aggregate.columns:
+        print("Before something in loop")
         if col not in ['terc', 'injection_date'] and merged_aggregate[col].dtype == float:
+            print("Before fillna")
             merged_aggregate[col] = merged_aggregate[col].fillna(0).astype(int)
 
+    print("Before return in merge")
     return merged_aggregate
 
 def correct_aggregates_column_order_plus_injection_date(aggregate_0):
