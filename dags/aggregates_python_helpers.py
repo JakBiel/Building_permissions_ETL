@@ -7,6 +7,7 @@ from datetime import datetime, timedelta
 
 import geopandas as gpd
 import pandas as pd
+import pendulum
 import requests
 import roman
 from airflow.utils.email import send_email
@@ -99,42 +100,24 @@ def load_permissions_to_bq(file_path, params, **kwargs):
 
     today_date_minus_month = pd.NA
 
+    kwargs_execution_date = kwargs.get('execution_date')
+    today_date_before_convertion = kwargs_execution_date.strftime('%Y-%m-%d %H:%M:%S')
+
     if mode == 'update':
-        today_date_before_convertion = kwargs.get('execution_date', datetime.utcnow())
-        if isinstance(today_date_before_convertion, datetime):
-            today_date_str = today_date_before_convertion.strftime('%Y-%m-%dT%H:%M:%S')
-            today_date = convert_iso_to_standard_format(today_date_str)
-            today_date_minus_month = get_first_day_of_previous_month(today_date)
-        else:
-            today_date = convert_iso_to_standard_format(today_date_before_convertion)
-            today_date_minus_month = get_first_day_of_previous_month(today_date)
-        if today_date is None or today_date_minus_month is None:
-            logging.critical("Critical Error: 'today_date' or 'today_date_minus_month' is None. Exiting program.", file=sys.stderr)
-            raise Exception("InvalidDateError: Either 'today_date' or 'today_date_minus_month' has failed to be set properly.")
+        if today_date_before_convertion is None:
+            raise ValueError("Critical Error: Execution date is missing!")
+        today_date_minus_month = get_first_day_of_previous_month(today_date_before_convertion)
+        if today_date_before_convertion is None or today_date_minus_month is None:
+            logging.critical("Critical Error: 'today_date_before_convertion' or 'today_date_minus_month' is None. Exiting program.", file=sys.stderr)
+            raise Exception("InvalidDateError: Either 'today_date_before_convertion' or 'today_date_minus_month' has failed to be set properly.")
         
     logging.info(f"CAUTION: current value of the <today_date_minus_month> parameter is {today_date_minus_month}")
 
-    filtered_df = filter_data_on_date(file_path, today_date_minus_month)
+    filtered_df = filter_data_on_date(file_path, today_date_minus_month, today_date_before_convertion)
 
     corrected_data_df = data_correction_on_invalid_terc_codes(filtered_df, gdf_powiaty)
 
     insert_permissions_to_db(corrected_data_df, params)
-
-#Especially for Apache Airflow metadata dates convertion
-def convert_iso_to_standard_format(iso_date_str):
-    """Convert an ISO 8601 date string to 'YYYY-MM-DD HH:MM:SS' format for Python versions older than 3.7."""
-    try:
-        # Parse the ISO 8601 string to a datetime object manually
-        # Note: This assumes the input is always in 'YYYY-MM-DDTHH:MM:SS.ssssss' format
-        date_obj = datetime.strptime(iso_date_str.split('.')[0], '%Y-%m-%dT%H:%M:%S')
-        
-        # Format the datetime object back to a string in 'YYYY-MM-DD HH:MM:SS' format
-        standard_date_str = date_obj.strftime('%Y-%m-%d %H:%M:%S')
-        
-        return standard_date_str
-    except ValueError as e:
-        logging.error(f"Error converting date: {e}")
-        return None
     
 def get_first_day_of_previous_month(date_str):
     """Returns the first day of the month before the given date."""
@@ -193,7 +176,7 @@ def insert_permissions_to_db(df, params):
         logging.info(f"Loaded batch {batch_num + 1} of {num_batches} to the database")
 
 # Data processing and validation functions
-def filter_data_on_date(file_path, min_date_str):
+def filter_data_on_date(file_path, min_date_str, curr_date_str):
     """Filter CSV data based on a minimum date."""
     column_names = [
         'numer_ewidencyjny_system', 'numer_ewidencyjny_urzad', 'data_wplywu_wniosku_do_urzedu', 
@@ -208,11 +191,15 @@ def filter_data_on_date(file_path, min_date_str):
     df['data_wplywu_wniosku_do_urzedu'] = convert_column_to_date(df, 'data_wplywu_wniosku_do_urzedu')
     filtered_df = df
     if not pd.isna(min_date_str):
-        min_date = convert_text_to_date(min_date_str)      
-        filtered_df = df[df['data_wplywu_wniosku_do_urzedu'] > min_date]
-        logging.info("There was a filtration of data by dates")
+        min_date = convert_text_to_date(min_date_str)
+        curr_date = convert_text_to_date(curr_date_str)    
+        filtered_df0 = df[df['data_wplywu_wniosku_do_urzedu'] > min_date]
+        filtered_df = filtered_df0[filtered_df0['data_wplywu_wniosku_do_urzedu'] < curr_date]
+        logging.info("There was a LAST MONTH filtration of data by dates")
     else:
-        logging.info("There was NO filtration of data by dates")
+        curr_date = convert_text_to_date(curr_date_str)
+        filtered_df = df[df['data_wplywu_wniosku_do_urzedu'] < curr_date]
+        logging.info("There was TILL-EXECUTION DATE filtration of data by dates")
 
     return filtered_df
 
@@ -340,18 +327,22 @@ def convert_text_to_date(text_date):
         logging.info(f"Unsuccessful conversion in <convert_text_to_date> function")
         return 
     
-def superior_aggregates_creator(params):
+def superior_aggregates_creator(params, **kwargs):
     """Function to create aggregates."""
     dataset_id = params['dataset_id']
     project_id = params['project_id']
-    table_id_for_aggregates = f"{dataset_id}.new_aggregate_table"
+    agreg_id = "new_aggregate_table"
+    table_id_for_aggregates = f"{dataset_id}.{agreg_id}"
 
     client = bigquery.Client()
+
+    exec_date = kwargs['execution_date']
+    formatted_exec_date = exec_date.strftime('%Y-%m-%d')
 
     query = f"""
     SELECT *
     FROM `{project_id}.{dataset_id}.permissions_results2022`
-    WHERE DATE(TIMESTAMP(data_wplywu_wniosku_do_urzedu)) >= DATE_SUB(CURRENT_DATE(), INTERVAL 3 MONTH);
+    WHERE DATE(TIMESTAMP(data_wplywu_wniosku_do_urzedu)) >= DATE_SUB('{formatted_exec_date}', INTERVAL 3 MONTH);
     """
 
     query_job = client.query(query)
@@ -362,8 +353,8 @@ def superior_aggregates_creator(params):
 
 
     # Prepare date-related data
-    today = pd.Timestamp(datetime.now())
-
+    today = pendulum.instance(kwargs.get('execution_date')).naive()
+   
     # Filter data for the last 3, 2, and 1 month(s)
     df_last_3m = df
     df_last_2m = df[df['data_wplywu_wniosku_do_urzedu'] >= today - pd.DateOffset(months=2)]
@@ -376,7 +367,7 @@ def superior_aggregates_creator(params):
 
     # Merge and correct aggregates
     summary_aggregate = merge_aggregates(aggregate3m, aggregate2m, aggregate1m)
-    final_aggregate = correct_aggregates_column_order_plus_injection_date(summary_aggregate)
+    final_aggregate = correct_aggregates_column_order_plus_injection_date(summary_aggregate, **kwargs)
 
     #Temporary download of powiaty list for additional validation of the final aggregate
     query_powiaty = f"""
@@ -388,7 +379,7 @@ def superior_aggregates_creator(params):
     powiaty_df = query_job_powiaty.to_dataframe()
     
     final_aggregate_after_removals = removing_false_records_from_aggregate(final_aggregate,powiaty_df)
-    final_aggregate = adding_empty_records_for_powiats_with_zero_permissions(final_aggregate_after_removals, powiaty_df)
+    final_aggregate = adding_empty_records_for_powiats_with_zero_permissions(final_aggregate_after_removals, powiaty_df, **kwargs)
 
     # Clean column names to meet BigQuery requirements
     final_aggregate.columns = [col.replace(' ', '_').replace('/', '_').replace('-', '_') for col in final_aggregate.columns]
@@ -396,11 +387,34 @@ def superior_aggregates_creator(params):
     # Ensure column names do not start with digits
     final_aggregate.columns = ['_' + col if col[0].isdigit() else col for col in final_aggregate.columns]
 
-    # Directly save the DataFrame to BigQuery
-    final_aggregate.to_gbq(table_id_for_aggregates, project_id=project_id, if_exists='append', progress_bar=True)
-
-    # Log a message to indicate successful save operation
-    logging.info(f"DataFrame has been successfully saved to BigQuery, table: {table_id_for_aggregates}.")
+    # Preparation for checking if the BigQuery table was already created
+    bq_table_to_be_checked__id = f"{project_id}.{dataset_id}.{agreg_id}"
+    try:
+        existing_table = client.get_table(bq_table_to_be_checked__id)  # Checking if the BigQuery table was already created
+        existing_table_columns = {field.name: field.field_type for field in existing_table.schema}
+        # Checking which columns need to be added to the final_aggregate
+        for column in existing_table_columns:
+            if column not in final_aggregate.columns:
+                final_aggregate[column] = 0  # Adding the missing column with zeroes
+        # Checking which clumns need to be added to the BigQuery aggregate table
+        new_columns = []
+        for column in final_aggregate.columns:
+            if column not in existing_table_columns:
+                new_columns.append(bigquery.SchemaField(column, 'INTEGER'))
+        if new_columns:
+            existing_table.schema += new_columns  # Dodajemy nowe kolumny do obecnego schematu
+            client.update_table(existing_table, ['schema'])  # Aktualizujemy schemat w BigQuery
+        final_aggregate.to_gbq(table_id_for_aggregates, project_id=project_id, if_exists='append', progress_bar=True)
+        # Log a message to indicate successful save operation
+        logging.info(f"DataFrame has been successfully saved to BigQuery, table: {table_id_for_aggregates}.")
+    except NotFound:
+        # The aggregate table in BigQuery was not created yet. It's time to do it
+        logging.info(f"Table {bq_table_to_be_checked__id} doesn't exist. It is being already created")
+        # Directly save the DataFrame to BigQuery
+        final_aggregate.to_gbq(table_id_for_aggregates, project_id=project_id, if_exists='append', progress_bar=True)
+        # Log a message to indicate successful save operation
+        logging.info(f"DataFrame has been successfully saved to BigQuery, table: {table_id_for_aggregates}.")
+   
     
 
 def aggregate_creator(df, prefix):
@@ -495,10 +509,12 @@ def merge_aggregates(aggregate3m, aggregate2m, aggregate1m):
     return merged_aggregate
 
 
-def correct_aggregates_column_order_plus_injection_date(aggregate_0):
+def correct_aggregates_column_order_plus_injection_date(aggregate_0, **kwargs):
 
     # Adding 'injection_date' after ensuring 'terc' is a column
-    aggregate_0['injection_date'] = datetime.utcnow().strftime('%Y-%m-%d %H:%M:%S.%f')[:-3] + ' UTC'
+    date_of_injection = kwargs.get('execution_date')
+    date_of_injection = date_of_injection.strftime('%Y-%m-%d %H:%M:%S.%f')[:-3] + ' UTC'
+    aggregate_0['injection_date'] = date_of_injection
 
     # Prepare ordered columns list with 'terc' and 'injection_date' at the beginning
     ordered_columns = ['terc', 'injection_date'] + [col for col in aggregate_0.columns if col not in ['terc', 'injection_date']]
@@ -526,7 +542,7 @@ def removing_false_records_from_aggregate(final_aggregate, powiaty_df):
     # Return the cleaned final_aggregate DataFrame
     return final_aggregate_cleaned
 
-def adding_empty_records_for_powiats_with_zero_permissions(final_aggregate_after_removals1, powiaty_df1):
+def adding_empty_records_for_powiats_with_zero_permissions(final_aggregate_after_removals1, powiaty_df1, **kwargs):
     """
     Add empty records for powiats with zero permissions.
 
@@ -549,12 +565,15 @@ def adding_empty_records_for_powiats_with_zero_permissions(final_aggregate_after
     # Create empty records DataFrame with the same schema as merged_df
     empty_records = pd.DataFrame(columns=columns_and_types.keys())
     
+    date_of_injection = kwargs.get('execution_date')
+    date_of_injection = date_of_injection.strftime('%Y-%m-%d %H:%M:%S.%f')[:-3] + ' UTC'
+
     # Fill empty_records DataFrame with zeros
     for column in empty_records.columns:
         if column == 'unit_id':
             empty_records['unit_id'] = no_permission_powiats['JPT_KOD_JE']
         elif column == 'injection_date':
-            empty_records['injection_date'] = datetime.utcnow().strftime('%Y-%m-%d %H:%M:%S.%f')[:-3] + ' UTC'
+            empty_records['injection_date'] = date_of_injection
         else:
             empty_records[column] = 0
     
