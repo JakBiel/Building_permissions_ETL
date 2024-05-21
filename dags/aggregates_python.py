@@ -90,7 +90,8 @@ with DAG(
         task_id='aggregates_creation_task',
         python_callable=main_of_aggregates_creation,
         provide_context=True,
-        dag=dag
+        dag=dag,
+        execution_timeout=timedelta(minutes=8)
     )
 
     # Define the mail task

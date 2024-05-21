@@ -402,14 +402,20 @@ def superior_aggregates_creator(params, **kwargs):
             if column not in existing_table_columns:
                 new_columns.append(bigquery.SchemaField(column, 'INTEGER'))
         if new_columns:
-            existing_table.schema += new_columns  # Dodajemy nowe kolumny do obecnego schematu
-            client.update_table(existing_table, ['schema'])  # Aktualizujemy schemat w BigQuery
+            existing_table.schema += new_columns
+            client.update_table(existing_table, ['schema'])  # BigQuery schema update
+
+            # Update newly added columns with 0 in BigQuery
+            for new_column in new_columns:
+                update_query = f"""
+                UPDATE `{bq_table_to_be_checked__id}`
+                SET {new_column.name} = 0
+                WHERE {new_column.name} IS NULL
+                """
+                client.query(update_query).result()
 
         # Ensure no null values are present in the final DataFrame
         final_aggregate.fillna(0, inplace=True)
-
-        # Log for debugging
-        logging.info(f"Columns with null values before saving to BigQuery: {final_aggregate.columns[final_aggregate.isnull().any()].tolist()}")
 
         final_aggregate.to_gbq(table_id_for_aggregates, project_id=project_id, if_exists='append', progress_bar=True)
         # Log a message to indicate successful save operation
@@ -420,9 +426,6 @@ def superior_aggregates_creator(params, **kwargs):
 
         # Ensure no null values are present in the final DataFrame
         final_aggregate.fillna(0, inplace=True)
-
-        # Log for debugging
-        logging.info(f"Columns with null values before saving to BigQuery: {final_aggregate.columns[final_aggregate.isnull().any()].tolist()}")
 
         # Directly save the DataFrame to BigQuery
         final_aggregate.to_gbq(table_id_for_aggregates, project_id=project_id, if_exists='append', progress_bar=True)
@@ -480,9 +483,6 @@ def aggregate_creator(df, prefix):
     
     # Fill missing values with 0
     pivot.fillna(0, inplace=True)
-
-    # Log for debugging
-    logging.info(f"Columns with null values after aggregate_creator: {pivot.columns[pivot.isnull().any()].tolist()}")
 
     logging.info(f"Completed aggregate_creator with prefix: {prefix}")
     return pivot
