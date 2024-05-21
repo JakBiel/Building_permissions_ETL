@@ -378,7 +378,7 @@ def superior_aggregates_creator(params, **kwargs):
     query_job_powiaty = client.query(query_powiaty)
     powiaty_df = query_job_powiaty.to_dataframe()
     
-    final_aggregate_after_removals = removing_false_records_from_aggregate(final_aggregate,powiaty_df)
+    final_aggregate_after_removals = removing_false_records_from_aggregate(final_aggregate, powiaty_df)
     final_aggregate = adding_empty_records_for_powiats_with_zero_permissions(final_aggregate_after_removals, powiaty_df, **kwargs)
 
     # Clean column names to meet BigQuery requirements
@@ -396,7 +396,7 @@ def superior_aggregates_creator(params, **kwargs):
         for column in existing_table_columns:
             if column not in final_aggregate.columns:
                 final_aggregate[column] = 0  # Adding the missing column with zeroes
-        # Checking which clumns need to be added to the BigQuery aggregate table
+        # Checking which columns need to be added to the BigQuery aggregate table
         new_columns = []
         for column in final_aggregate.columns:
             if column not in existing_table_columns:
@@ -404,39 +404,90 @@ def superior_aggregates_creator(params, **kwargs):
         if new_columns:
             existing_table.schema += new_columns  # Dodajemy nowe kolumny do obecnego schematu
             client.update_table(existing_table, ['schema'])  # Aktualizujemy schemat w BigQuery
+
+        # Ensure no null values are present in the final DataFrame
+        final_aggregate.fillna(0, inplace=True)
+
+        # Log for debugging
+        logging.info(f"Columns with null values before saving to BigQuery: {final_aggregate.columns[final_aggregate.isnull().any()].tolist()}")
+
         final_aggregate.to_gbq(table_id_for_aggregates, project_id=project_id, if_exists='append', progress_bar=True)
         # Log a message to indicate successful save operation
         logging.info(f"DataFrame has been successfully saved to BigQuery, table: {table_id_for_aggregates}.")
     except NotFound:
         # The aggregate table in BigQuery was not created yet. It's time to do it
         logging.info(f"Table {bq_table_to_be_checked__id} doesn't exist. It is being already created")
+
+        # Ensure no null values are present in the final DataFrame
+        final_aggregate.fillna(0, inplace=True)
+
+        # Log for debugging
+        logging.info(f"Columns with null values before saving to BigQuery: {final_aggregate.columns[final_aggregate.isnull().any()].tolist()}")
+
         # Directly save the DataFrame to BigQuery
         final_aggregate.to_gbq(table_id_for_aggregates, project_id=project_id, if_exists='append', progress_bar=True)
         # Log a message to indicate successful save operation
         logging.info(f"DataFrame has been successfully saved to BigQuery, table: {table_id_for_aggregates}.")
-   
-    
+
 
 def aggregate_creator(df, prefix):
-    aggregate = pd.pivot_table(df, index=['terc'], columns=['rodzaj_zam_budowlanego', 'kategoria'], 
-                               aggfunc='size', fill_value=0)
+    # Create initial pivot table with existing aggregation logic
+    pivot = pd.pivot_table(df, index='terc', columns=['rodzaj_zam_budowlanego', 'kategoria'], aggfunc='size', fill_value=0)
 
     # Ensure 'terc' becomes a column if it's part of the index
-    if 'terc' not in aggregate.columns:
-        aggregate.reset_index(inplace=True)
+    if 'terc' not in pivot.columns:
+        pivot.reset_index(inplace=True)
 
     # Modify column names except for 'terc'
-    if isinstance(aggregate.columns, pd.MultiIndex):
+    if isinstance(pivot.columns, pd.MultiIndex):
         # Flatten MultiIndex if necessary and append prefix
-        aggregate.columns = [f"{'_'.join(col).rstrip('_')}_{prefix}" if col[0] != 'terc' else col[0] for col in aggregate.columns.values]
+        pivot.columns = [f"{'_'.join(col).rstrip('_')}_{prefix}" if col[0] != 'terc' else col[0] for col in pivot.columns.values]
     else:
         # Append prefix to column names except for 'terc'
-        aggregate.columns = [f"{col}_{prefix}" if col != 'terc' else col for col in aggregate.columns]
+        pivot.columns = [f"{col}_{prefix}" if col != 'terc' else col for col in pivot.columns]
 
-    shorter_aggregate_column_names(aggregate)
-    deromanize_categories_numbers(aggregate)
+    # Add new columns for each 'rodzaj_zam_budowlanego'
+    for rodzaj in ['budowa nowego/nowych obiektów budowlanych', 
+                   'rozbudowa istniejącego/istniejących obiektów budowlanych', 
+                   'odbudowa istniejącego/istniejących obiektów budowlanych', 
+                   'nadbudowa istniejącego/istniejących obiektów budowlanych', 
+                   'wykonanie robót budowlanych innych niż wymienione powyżej']:
+        col_name = f"{rodzaj}_{prefix}"
+        if rodzaj in df['rodzaj_zam_budowlanego'].unique():
+            # Filter DataFrame for the specific 'rodzaj_zam_budowlanego'
+            filtered_df = df[df['rodzaj_zam_budowlanego'] == rodzaj]
+
+            # Group by 'terc' and count the occurrences
+            group_count = filtered_df.groupby('terc').size()
+
+            # Convert pivot index to match the 'terc' values
+            pivot = pivot.set_index('terc')
+
+            # Reindex to match the pivot index, filling missing values with 0
+            reindexed_count = group_count.reindex(pivot.index, fill_value=0)
+
+            # Assign the reindexed count to the new column in the pivot table
+            pivot[col_name] = reindexed_count
+
+            # Reset the index to restore the original pivot structure
+            pivot = pivot.reset_index()
+        else:
+            pivot[col_name] = 0
+            logging.info(f"Column {col_name} set to 0 as {rodzaj} is not in 'rodzaj_zam_budowlanego'")
+
+    shorter_aggregate_column_names(pivot)
+    deromanize_categories_numbers(pivot)
     
-    return aggregate
+    # Fill missing values with 0
+    pivot.fillna(0, inplace=True)
+
+    # Log for debugging
+    logging.info(f"Columns with null values after aggregate_creator: {pivot.columns[pivot.isnull().any()].tolist()}")
+
+    logging.info(f"Completed aggregate_creator with prefix: {prefix}")
+    return pivot
+
+
 
 def shorter_aggregate_column_names(aggregate):
     """Modify column names in the aggregate DataFrame in place."""
