@@ -98,22 +98,17 @@ def load_permissions_to_bq(file_path, params, **kwargs):
     mode = 'update' if table_has_records else 'full'
     logging.info(f"mode value is {mode}")
 
-    today_date_minus_month = pd.NA
+    execution_datetime_minus_month = pd.NA
 
-    kwargs_execution_date = kwargs.get('execution_date')
-    today_date_before_convertion = kwargs_execution_date.strftime('%Y-%m-%d %H:%M:%S')
+    execution_date = kwargs.get('execution_date')
+    execution_datetime = execution_date.strftime('%Y-%m-%d %H:%M:%S')
 
     if mode == 'update':
-        if today_date_before_convertion is None:
-            raise ValueError("Critical Error: Execution date is missing!")
-        today_date_minus_month = get_first_day_of_previous_month(today_date_before_convertion)
-        if today_date_before_convertion is None or today_date_minus_month is None:
-            logging.critical("Critical Error: 'today_date_before_convertion' or 'today_date_minus_month' is None. Exiting program.", file=sys.stderr)
-            raise Exception("InvalidDateError: Either 'today_date_before_convertion' or 'today_date_minus_month' has failed to be set properly.")
+        execution_datetime_minus_month = get_first_day_of_previous_month(execution_datetime)
         
-    logging.info(f"CAUTION: current value of the <today_date_minus_month> parameter is {today_date_minus_month}")
+    logging.info(f"CAUTION: current value of the <execution_datetime_minus_month> parameter is {execution_datetime_minus_month}")
 
-    filtered_df = filter_data_on_date(file_path, today_date_minus_month, today_date_before_convertion)
+    filtered_df = filter_data_on_date(file_path, execution_datetime_minus_month, execution_datetime)
 
     corrected_data_df = data_correction_on_invalid_terc_codes(filtered_df, gdf_powiaty)
 

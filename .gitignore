@@ -5,3 +5,4 @@ data/
 zip_data_postgres_db/
 zip_data_jupyter_notebook/
 plugins/
+.ipynb_checkpoints/
