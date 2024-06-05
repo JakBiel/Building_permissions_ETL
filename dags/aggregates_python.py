@@ -61,6 +61,7 @@ with DAG(
             'dataset_id': "airflow_dataset",
             'project_id': 'airflow-lab-415614',
             'table_id_name': 'permissions_results2022',
+            'aggregate_table_name': 'new_aggregate_table',
         }
         
 ) as dag:

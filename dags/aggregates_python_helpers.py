@@ -326,7 +326,7 @@ def superior_aggregates_creator(params, **kwargs):
     """Function to create aggregates."""
     dataset_id = params['dataset_id']
     project_id = params['project_id']
-    agreg_id = "new_aggregate_table"
+    agreg_id = params['aggregate_table_name']
     table_id_for_aggregates = f"{dataset_id}.{agreg_id}"
 
     client = bigquery.Client()
