@@ -34,32 +34,34 @@ def main_of_validation(params):
 
     validate_permissions_data(csv_file_path, absolute_path)
 
-def main_of_unzipped_data_uploader(params):
+def main_of_unzipped_data_uploader(params, **kwargs):
     # Path to the CSV file containing data to be validated
     csv_file_path = 'unpacked_zip_data_files/wynik_zgloszenia_2022_up.csv'
 
-    load_permissions_to_bq(csv_file_path, params)
+    load_permissions_to_bq(csv_file_path, params, **kwargs)
 
     logging.info("Data upload and validation completed.")
 
 
-def main_of_aggregates_creation(params):
+def main_of_aggregates_creation(params, **kwargs):
     """Main function for aggregates creation."""
 
-    superior_aggregates_creator(params)
+    superior_aggregates_creator(params, **kwargs)
 
 # DAG definition
 with DAG(
         default_args=default_args,
         dag_id='aggregates_python',
         description='Downloading given building permissions, saving in a database and generating aggregates',
-        start_date=datetime(2024, 1, 8),
+        start_date=datetime(2023, 3, 2),
         schedule_interval='0 0 1 * *',
         catchup=True,
+        max_active_runs=1,
         params={
             'dataset_id': "airflow_dataset",
             'project_id': 'airflow-lab-415614',
             'table_id_name': 'permissions_results2022',
+            'aggregate_table_name': 'new_aggregate_table',
         }
         
 ) as dag:
@@ -67,31 +69,37 @@ with DAG(
     zip_data_downloader_task = PythonOperator(
         task_id='zip_data_downloader_task',
         python_callable=main_of_zip_data_downloader,
+        provide_context=True,
         dag=dag
     )
 
     validation_task = PythonOperator(
         task_id='validation_task',
         python_callable=main_of_validation,
+        provide_context=True,
         dag=dag
     )
     
     unzipped_data_uploader_task = PythonOperator(
         task_id='unzipped_data_uploader',
         python_callable=main_of_unzipped_data_uploader,
+        provide_context=True,
         dag=dag
     )
 
     aggregates_creation_task = PythonOperator(
         task_id='aggregates_creation_task',
         python_callable=main_of_aggregates_creation,
-        dag=dag
+        provide_context=True,
+        dag=dag,
+        execution_timeout=timedelta(minutes=8)
     )
 
     # Define the mail task
     send_email_task = PythonOperator(
         task_id='send_email_task',
         python_callable=email_callback,
+        provide_context=True,
         dag=dag,
     )
 

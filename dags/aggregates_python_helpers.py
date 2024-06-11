@@ -7,6 +7,7 @@ from datetime import datetime, timedelta
 
 import geopandas as gpd
 import pandas as pd
+import pendulum
 import requests
 import roman
 from airflow.utils.email import send_email
@@ -97,44 +98,21 @@ def load_permissions_to_bq(file_path, params, **kwargs):
     mode = 'update' if table_has_records else 'full'
     logging.info(f"mode value is {mode}")
 
-    today_date_minus_month = pd.NA
+    execution_datetime_minus_month = pd.NA
+
+    execution_date = kwargs.get('execution_date')
+    execution_datetime = execution_date.strftime('%Y-%m-%d %H:%M:%S')
 
     if mode == 'update':
-        today_date_before_convertion = kwargs.get('execution_date', datetime.utcnow())
-        if isinstance(today_date_before_convertion, datetime):
-            today_date_str = today_date_before_convertion.strftime('%Y-%m-%dT%H:%M:%S')
-            today_date = convert_iso_to_standard_format(today_date_str)
-            today_date_minus_month = get_first_day_of_previous_month(today_date)
-        else:
-            today_date = convert_iso_to_standard_format(today_date_before_convertion)
-            today_date_minus_month = get_first_day_of_previous_month(today_date)
-        if today_date is None or today_date_minus_month is None:
-            logging.critical("Critical Error: 'today_date' or 'today_date_minus_month' is None. Exiting program.", file=sys.stderr)
-            raise Exception("InvalidDateError: Either 'today_date' or 'today_date_minus_month' has failed to be set properly.")
+        execution_datetime_minus_month = get_first_day_of_previous_month(execution_datetime)
         
-    logging.info(f"CAUTION: current value of the <today_date_minus_month> parameter is {today_date_minus_month}")
+    logging.info(f"CAUTION: current value of the <execution_datetime_minus_month> parameter is {execution_datetime_minus_month}")
 
-    filtered_df = filter_data_on_date(file_path, today_date_minus_month)
+    filtered_df = filter_data_on_date(file_path, execution_datetime_minus_month, execution_datetime)
 
     corrected_data_df = data_correction_on_invalid_terc_codes(filtered_df, gdf_powiaty)
 
     insert_permissions_to_db(corrected_data_df, params)
-
-#Especially for Apache Airflow metadata dates convertion
-def convert_iso_to_standard_format(iso_date_str):
-    """Convert an ISO 8601 date string to 'YYYY-MM-DD HH:MM:SS' format for Python versions older than 3.7."""
-    try:
-        # Parse the ISO 8601 string to a datetime object manually
-        # Note: This assumes the input is always in 'YYYY-MM-DDTHH:MM:SS.ssssss' format
-        date_obj = datetime.strptime(iso_date_str.split('.')[0], '%Y-%m-%dT%H:%M:%S')
-        
-        # Format the datetime object back to a string in 'YYYY-MM-DD HH:MM:SS' format
-        standard_date_str = date_obj.strftime('%Y-%m-%d %H:%M:%S')
-        
-        return standard_date_str
-    except ValueError as e:
-        logging.error(f"Error converting date: {e}")
-        return None
     
 def get_first_day_of_previous_month(date_str):
     """Returns the first day of the month before the given date."""
@@ -193,7 +171,7 @@ def insert_permissions_to_db(df, params):
         logging.info(f"Loaded batch {batch_num + 1} of {num_batches} to the database")
 
 # Data processing and validation functions
-def filter_data_on_date(file_path, min_date_str):
+def filter_data_on_date(file_path, min_date_str, curr_date_str):
     """Filter CSV data based on a minimum date."""
     column_names = [
         'numer_ewidencyjny_system', 'numer_ewidencyjny_urzad', 'data_wplywu_wniosku_do_urzedu', 
@@ -208,11 +186,15 @@ def filter_data_on_date(file_path, min_date_str):
     df['data_wplywu_wniosku_do_urzedu'] = convert_column_to_date(df, 'data_wplywu_wniosku_do_urzedu')
     filtered_df = df
     if not pd.isna(min_date_str):
-        min_date = convert_text_to_date(min_date_str)      
-        filtered_df = df[df['data_wplywu_wniosku_do_urzedu'] > min_date]
-        logging.info("There was a filtration of data by dates")
+        min_date = convert_text_to_date(min_date_str)
+        curr_date = convert_text_to_date(curr_date_str)    
+        filtered_df0 = df[df['data_wplywu_wniosku_do_urzedu'] > min_date]
+        filtered_df = filtered_df0[filtered_df0['data_wplywu_wniosku_do_urzedu'] < curr_date]
+        logging.info("There was a LAST MONTH filtration of data by dates")
     else:
-        logging.info("There was NO filtration of data by dates")
+        curr_date = convert_text_to_date(curr_date_str)
+        filtered_df = df[df['data_wplywu_wniosku_do_urzedu'] < curr_date]
+        logging.info("There was TILL-EXECUTION DATE filtration of data by dates")
 
     return filtered_df
 
@@ -280,26 +262,35 @@ def assign_terc_and_validate(row, gdf1):
 
     terc_code = row['terc']
     untypical = None  # a new variable for new statuses like 'Unknown' or 'Unknown2'
+    jednostki_numer = row['jednostki_numer']
+
     if not terc_code or pd.isnull(terc_code) or terc_code == 'nan':  # If terc code is empty
-        miasto = row['miasto']
-        if pd.notnull(miasto) and miasto != 'nan':
-            matching_rows = gdf1[gdf1['JPT_NAZWA_'].str.contains(miasto, case=False, na=False)]
-        else:
-            matching_rows = pd.DataFrame()
-        
-        if not matching_rows.empty:
-            matching_row = matching_rows.iloc[0]
-            terc_code = matching_row['JPT_KOD_JE']
+        jednostki_numer = row['jednostki_numer']
+        if pd.notnull(jednostki_numer) and jednostki_numer != 'nan':
+            terc_code = jednostki_numer[:4]
             untypical = 'Matched'
         else:
-            terc_code = 'Unknown'
-            untypical = 'Unknown'
+            miasto = row['miasto']
+            if pd.notnull(miasto) and miasto != 'nan':
+                matching_rows = gdf1[gdf1['JPT_NAZWA_'].str.contains(miasto, case=False, na=False)]
+            else:
+                matching_rows = pd.DataFrame()
+            
+            if not matching_rows.empty:
+                matching_row = matching_rows.iloc[0]
+                terc_code = matching_row['JPT_KOD_JE']
+                untypical = 'Matched'
+            else:
+                terc_code = 'Unknown'
+                untypical = 'Unknown'
 
     if len(str(terc_code)) == 7 and str(terc_code).isdigit(): #checking if terc_code is of a typical terc_code type
         if terc_code[:2] not in voivodeships.keys():
             untypical = 'Unknown2' 
     elif len(str(terc_code)) == 6 and str(terc_code).isdigit():  # checking if the terc_code consists of 6 digits and is a number so it could be fixed with setting '0' at the beginning
         terc_code = '0' + str(terc_code) 
+        if terc_code[:2] not in voivodeships.keys():
+            untypical = 'Unknown2'
     elif len(str(terc_code)) == 4 and str(terc_code).isdigit() and untypical == 'Matched':
         pass
     elif untypical == 'Unknown':
@@ -331,29 +322,34 @@ def convert_text_to_date(text_date):
         logging.info(f"Unsuccessful conversion in <convert_text_to_date> function")
         return 
     
-def superior_aggregates_creator(params):
+def superior_aggregates_creator(params, **kwargs):
     """Function to create aggregates."""
     dataset_id = params['dataset_id']
     project_id = params['project_id']
-    table_id_for_aggregates = f"{dataset_id}.new_aggregate_table"
+    agreg_id = params['aggregate_table_name']
+    table_id_for_aggregates = f"{dataset_id}.{agreg_id}"
 
     client = bigquery.Client()
+
+    exec_date = kwargs['execution_date']
+    formatted_exec_date = exec_date.strftime('%Y-%m-%d')
 
     query = f"""
     SELECT *
     FROM `{project_id}.{dataset_id}.permissions_results2022`
-    WHERE DATE(TIMESTAMP(data_wplywu_wniosku_do_urzedu)) >= DATE_SUB(CURRENT_DATE(), INTERVAL 3 MONTH);
+    WHERE DATE(TIMESTAMP(data_wplywu_wniosku_do_urzedu)) >= DATE_SUB('{formatted_exec_date}', INTERVAL 3 MONTH);
     """
 
     query_job = client.query(query)
     df = query_job.to_dataframe()
 
     df['data_wplywu_wniosku_do_urzedu'] = pd.to_datetime(df['data_wplywu_wniosku_do_urzedu'], errors='coerce')
-    df['terc'] = pd.to_numeric(df['terc'], errors='coerce').fillna(0).astype(int)
+    df['terc'] = df['terc'].str.slice(0, 4)
+
 
     # Prepare date-related data
-    today = pd.Timestamp(datetime.now())
-
+    today = pendulum.instance(kwargs.get('execution_date')).naive()
+   
     # Filter data for the last 3, 2, and 1 month(s)
     df_last_3m = df
     df_last_2m = df[df['data_wplywu_wniosku_do_urzedu'] >= today - pd.DateOffset(months=2)]
@@ -366,7 +362,19 @@ def superior_aggregates_creator(params):
 
     # Merge and correct aggregates
     summary_aggregate = merge_aggregates(aggregate3m, aggregate2m, aggregate1m)
-    final_aggregate = correct_aggregates_column_order_plus_injection_date(summary_aggregate)
+    final_aggregate = correct_aggregates_column_order_plus_injection_date(summary_aggregate, **kwargs)
+
+    #Temporary download of powiaty list for additional validation of the final aggregate
+    query_powiaty = f"""
+    SELECT JPT_KOD_JE
+    FROM `{project_id}.{dataset_id}.powiaty`;
+    """
+
+    query_job_powiaty = client.query(query_powiaty)
+    powiaty_df = query_job_powiaty.to_dataframe()
+    
+    final_aggregate_after_removals = removing_false_records_from_aggregate(final_aggregate, powiaty_df)
+    final_aggregate = adding_empty_records_for_powiats_with_zero_permissions(final_aggregate_after_removals, powiaty_df, **kwargs)
 
     # Clean column names to meet BigQuery requirements
     final_aggregate.columns = [col.replace(' ', '_').replace('/', '_').replace('-', '_') for col in final_aggregate.columns]
@@ -374,46 +382,185 @@ def superior_aggregates_creator(params):
     # Ensure column names do not start with digits
     final_aggregate.columns = ['_' + col if col[0].isdigit() else col for col in final_aggregate.columns]
 
-    # Directly save the DataFrame to BigQuery
-    final_aggregate.to_gbq(table_id_for_aggregates, project_id=project_id, if_exists='replace', progress_bar=True)
+    # Preparation for checking if the BigQuery table was already created
+    bq_table_to_be_checked__id = f"{project_id}.{dataset_id}.{agreg_id}"
+    try:
+        existing_table = client.get_table(bq_table_to_be_checked__id)  # Checking if the BigQuery table was already created
+        existing_table_columns = {field.name: field.field_type for field in existing_table.schema}
+        # Checking which columns need to be added to the final_aggregate
+        for column in existing_table_columns:
+            if column not in final_aggregate.columns:
+                final_aggregate[column] = 0  # Adding the missing column with zeroes
+        # Checking which columns need to be added to the BigQuery aggregate table
+        new_columns = []
+        for column in final_aggregate.columns:
+            if column not in existing_table_columns:
+                new_columns.append(bigquery.SchemaField(column, 'INTEGER'))
+        if new_columns:
+            existing_table.schema += new_columns
+            client.update_table(existing_table, ['schema'])  # BigQuery schema update
 
-    # Log a message to indicate successful save operation
-    logging.info(f"DataFrame has been successfully saved to BigQuery, table: {table_id_for_aggregates}.")
-    
+            # Update newly added columns with 0 in BigQuery
+            for new_column in new_columns:
+                update_query = f"""
+                UPDATE `{bq_table_to_be_checked__id}`
+                SET {new_column.name} = 0
+                WHERE {new_column.name} IS NULL
+                """
+                client.query(update_query).result()
+
+        # Ensure no null values are present in the final DataFrame
+        final_aggregate.fillna(0, inplace=True)
+
+        final_aggregate.to_gbq(table_id_for_aggregates, project_id=project_id, if_exists='append', progress_bar=True)
+        # Log a message to indicate successful save operation
+        logging.info(f"DataFrame has been successfully saved to BigQuery, table: {table_id_for_aggregates}.")
+    except NotFound:
+        # The aggregate table in BigQuery was not created yet. It's time to do it
+        logging.info(f"Table {bq_table_to_be_checked__id} doesn't exist. It is being already created")
+
+        # Ensure no null values are present in the final DataFrame
+        final_aggregate.fillna(0, inplace=True)
+
+        # Directly save the DataFrame to BigQuery
+        final_aggregate.to_gbq(table_id_for_aggregates, project_id=project_id, if_exists='append', progress_bar=True)
+        # Log a message to indicate successful save operation
+        logging.info(f"DataFrame has been successfully saved to BigQuery, table: {table_id_for_aggregates}.")
+
 
 def aggregate_creator(df, prefix):
-    aggregate = pd.pivot_table(df, index=['terc'], columns=['kategoria', 'rodzaj_zam_budowlanego'], 
-                               aggfunc='size', fill_value=0)
-    
+    # Create initial pivot table with existing aggregation logic
+    pivot = pd.pivot_table(df, index='terc', columns=['rodzaj_zam_budowlanego', 'kategoria'], aggfunc='size', fill_value=0)
+
     # Ensure 'terc' becomes a column if it's part of the index
-    if 'terc' not in aggregate.columns:
-        aggregate.reset_index(inplace=True)
+    if 'terc' not in pivot.columns:
+        pivot.reset_index(inplace=True)
 
     # Modify column names except for 'terc'
-    if isinstance(aggregate.columns, pd.MultiIndex):
-        # Flatten MultiIndex if necessary and prepend prefix
-        aggregate.columns = [f"{prefix}_{'_'.join(col).rstrip('_')}" if col[0] != 'terc' else col[0] for col in aggregate.columns.values]
+    if isinstance(pivot.columns, pd.MultiIndex):
+        # Flatten MultiIndex if necessary and append prefix
+        pivot.columns = [f"{'_'.join(col).rstrip('_')}_{prefix}" if col[0] != 'terc' else col[0] for col in pivot.columns.values]
     else:
-        # Prepend prefix to column names except for 'terc'
-        aggregate.columns = [f"{prefix}_{col}" if col != 'terc' else col for col in aggregate.columns]
+        # Append prefix to column names except for 'terc'
+        pivot.columns = [f"{col}_{prefix}" if col != 'terc' else col for col in pivot.columns]
+
+    # Add new columns for each 'rodzaj_zam_budowlanego'
+    for rodzaj in ['budowa nowego/nowych obiektów budowlanych', 
+                   'rozbudowa istniejącego/istniejących obiektów budowlanych', 
+                   'odbudowa istniejącego/istniejących obiektów budowlanych', 
+                   'nadbudowa istniejącego/istniejących obiektów budowlanych', 
+                   'wykonanie robót budowlanych innych niż wymienione powyżej']:
+        col_name = f"{rodzaj}_{prefix}"
+        if rodzaj in df['rodzaj_zam_budowlanego'].unique():
+            # Filter DataFrame for the specific 'rodzaj_zam_budowlanego'
+            filtered_df = df[df['rodzaj_zam_budowlanego'] == rodzaj]
+
+            # Group by 'terc' and count the occurrences
+            group_count = filtered_df.groupby('terc').size()
+
+            # Convert pivot index to match the 'terc' values
+            pivot = pivot.set_index('terc')
+
+            # Reindex to match the pivot index, filling missing values with 0
+            reindexed_count = group_count.reindex(pivot.index, fill_value=0)
+
+            # Assign the reindexed count to the new column in the pivot table
+            pivot[col_name] = reindexed_count
+
+            # Reset the index to restore the original pivot structure
+            pivot = pivot.reset_index()
+        else:
+            pivot[col_name] = 0
+            logging.info(f"Column {col_name} set to 0 as {rodzaj} is not in 'rodzaj_zam_budowlanego'")
+
+    shorter_aggregate_column_names(pivot)
+    deromanize_categories_numbers(pivot)
+    
+    # Fill missing values with 0
+    pivot.fillna(0, inplace=True)
+
+    logging.info(f"Completed aggregate_creator with prefix: {prefix}")
+    return pivot
+
+
+
+def shorter_aggregate_column_names(aggregate):
+    """Modify column names in the aggregate DataFrame in place."""
+    
+    # Define the prefixes to match
+    prefixes = ['budo', 'rozb', 'odbu', 'nadb']
+
+    # Initialize list to keep track of columns to drop
+    columns_to_drop = []
+
+    # Iterate over each column by its index and name
+    for index, col in enumerate(aggregate.columns):
+        # Check if the column starts with any of the prefixes
+        if any(col.startswith(prefix) for prefix in prefixes):
+            # Extract the first word (prefix) and keep the content after the first underscore
+            first_word = col.split(' ')[0]
+            suffix_index = col.find('_')
+            if suffix_index != -1:
+                # Directly modify the column name in the DataFrame
+                new_name = f"{first_word}{col[suffix_index:]}"
+                aggregate.columns.values[index] = new_name
+        elif col.startswith('terc'):
+            # Keep the column unchanged if it starts with 'terc'
+            continue
+        else:
+            # Mark the column for removal if it doesn't meet the criteria
+            columns_to_drop.append(col)
+
+    # Remove columns that don't meet the criteria
+    aggregate.drop(columns=columns_to_drop, inplace=True)
+
+    return aggregate
+
+def deromanize_categories_numbers(aggregate):
+    """Replace Roman numerals between underscores with Arabic numerals prefixed by 'kat_'."""
+    for index in range(len(aggregate.columns)):
+        col_name = aggregate.columns[index]
+
+        # Split the column name by underscores
+        parts = col_name.split('_')
+        if len(parts) >= 3:
+            try:
+                roman_numeral = parts[1]
+                arabic_number = str(roman.fromRoman(roman_numeral))
+                parts[1] = f"kat_{arabic_number}"
+                aggregate.columns.values[index] = '_'.join(parts)
+            except roman.InvalidRomanNumeralError:
+                continue
 
     return aggregate
 
 def merge_aggregates(aggregate3m, aggregate2m, aggregate1m):
+    """Merge three aggregates on 'terc' using join."""
+    
+    # Set index 'terc' for the first two aggregates
+    aggregate3m.set_index('terc', inplace=True)
+    aggregate2m.set_index('terc', inplace=True)
 
-    merged_aggregate = pd.merge(aggregate3m, aggregate2m, on='terc', how='outer', suffixes=('_3m', '_2m'))
-    merged_aggregate = pd.merge(merged_aggregate, aggregate1m, on='terc', how='outer')
+    # Join the first two aggregates on the 'terc' index
+    merged_aggregate = aggregate3m.join(aggregate2m, how='outer').reset_index()
 
+    # Join the result with the third aggregate
+    merged_aggregate = merged_aggregate.set_index('terc').join(aggregate1m.set_index('terc'), how='outer').reset_index()
+
+    # Replace NaN values with zeros and convert to int for numeric columns
     for col in merged_aggregate.columns:
         if col not in ['terc', 'injection_date'] and merged_aggregate[col].dtype == float:
             merged_aggregate[col] = merged_aggregate[col].fillna(0).astype(int)
 
     return merged_aggregate
 
-def correct_aggregates_column_order_plus_injection_date(aggregate_0):
+
+def correct_aggregates_column_order_plus_injection_date(aggregate_0, **kwargs):
 
     # Adding 'injection_date' after ensuring 'terc' is a column
-    aggregate_0['injection_date'] = datetime.utcnow().strftime('%Y-%m-%d %H:%M:%S.%f')[:-3] + ' UTC'
+    date_of_injection = kwargs.get('execution_date')
+    date_of_injection = date_of_injection.strftime('%Y-%m-%d %H:%M:%S.%f')[:-3] + ' UTC'
+    aggregate_0['injection_date'] = date_of_injection
 
     # Prepare ordered columns list with 'terc' and 'injection_date' at the beginning
     ordered_columns = ['terc', 'injection_date'] + [col for col in aggregate_0.columns if col not in ['terc', 'injection_date']]
@@ -424,6 +571,70 @@ def correct_aggregates_column_order_plus_injection_date(aggregate_0):
     aggregate_ordered = aggregate_ordered.rename(columns={'terc': 'unit_id'})
 
     return aggregate_ordered
+
+def removing_false_records_from_aggregate(final_aggregate, powiaty_df):
+    # Merge final_aggregate with powiaty_df on 'unit_id' and 'JPT_KOD_JE'
+    merged_df = final_aggregate.merge(powiaty_df, how='left', left_on='unit_id', right_on='JPT_KOD_JE')
+    
+    # Select rows where 'JPT_KOD_JE' is null, indicating no match was found
+    false_records = merged_df[merged_df['JPT_KOD_JE'].isnull()]
+    
+    # Log the number of false records
+    logging.info(f"Number of false records to be removed from the final aggregate: {len(false_records)}")
+    
+    # Remove false records from final_aggregate
+    final_aggregate_cleaned = final_aggregate[~final_aggregate['unit_id'].isin(false_records['unit_id'])]
+    
+    # Return the cleaned final_aggregate DataFrame
+    return final_aggregate_cleaned
+
+def adding_empty_records_for_powiats_with_zero_permissions(final_aggregate_after_removals1, powiaty_df1, **kwargs):
+    """
+    Add empty records for powiats with zero permissions.
+
+    Args:
+    - final_aggregate_after_removals1: DataFrame containing the final aggregate after false records removal.
+    - powiaty_df1: DataFrame containing powiaty data.
+
+    Returns:
+    - DataFrame: Final aggregate DataFrame with empty records added for powiats with zero permissions.
+    """
+    # Merge final_aggregate_after_removals1 with powiaty_df1 on 'unit_id' and 'JPT_KOD_JE'
+    merged_df = final_aggregate_after_removals1.merge(powiaty_df1, how='right', left_on='unit_id', right_on='JPT_KOD_JE')
+    
+    # Select rows where 'unit_id' is null, indicating no match was found
+    no_permission_powiats = merged_df[merged_df['unit_id'].isnull()]
+    
+    # Get column names and data types from merged_df
+    columns_and_types = merged_df.dtypes.to_dict()
+    
+    # Create empty records DataFrame with the same schema as merged_df
+    empty_records = pd.DataFrame(columns=columns_and_types.keys())
+    
+    date_of_injection = kwargs.get('execution_date')
+    date_of_injection = date_of_injection.strftime('%Y-%m-%d %H:%M:%S.%f')[:-3] + ' UTC'
+
+    # Fill empty_records DataFrame with zeros
+    for column in empty_records.columns:
+        if column == 'unit_id':
+            empty_records['unit_id'] = no_permission_powiats['JPT_KOD_JE']
+        elif column == 'injection_date':
+            empty_records['injection_date'] = date_of_injection
+        else:
+            empty_records[column] = 0
+    
+    # Concatenate empty records with final_aggregate_after_removals1
+    final_aggregate_with_empty = pd.concat([final_aggregate_after_removals1, empty_records], ignore_index=True)
+    
+    # Sort final_aggregate_with_empty by 'unit_id' column
+    final_aggregate_with_empty.sort_values(by='unit_id', inplace=True)
+
+    # Remove column 'JPT_KOD_JE'
+    final_aggregate_with_empty.drop(columns=['JPT_KOD_JE'], inplace=True, errors='ignore')
+
+    return final_aggregate_with_empty
+
+
 
 def email_callback(params):
     recipient_email = os.getenv('EMAIL_ADDRESS_2')

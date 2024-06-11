@@ -50,6 +50,8 @@ Moreover, for this project, I created visualisations basing on the "permissions_
 
 Also, as a part of the project, I created related visualisations in Looker Studio.
 
+![LOOKER GIF](img/looker_gif.gif)
+
 ## Docker containers runned in this project
 
 - **airflow-webserver-1** - to present a web page that is a GUI to use Apache Airflow
@@ -88,7 +90,7 @@ README.md
 
 ```bash
 docker-compose pull
-
+```
 
 - Then, type the following command to initialize all the containers that the project includes:
 
@@ -157,7 +159,7 @@ lab3
 
 ## A data sample from the table "permissions_results2022"
 
-![DATA_EXMPL](img/bq_pic1.png)
+![DATA_EXMPL](img/bq_pic2.png)
 
 ## Table schema of "permissions_results2022" in BigQuery
 
