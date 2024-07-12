@@ -4,7 +4,6 @@ from datetime import datetime, timedelta
 
 import pandas as pd
 from aggregates_python_helpers import (
-    absolute_path,
     download_and_unpack_zip,
     email_callback,
     load_permissions_to_bq,
@@ -12,24 +11,25 @@ from aggregates_python_helpers import (
     validate_permissions_data,
 )
 from airflow import DAG
-from airflow.operators.email import EmailOperator
 from airflow.operators.python import PythonOperator
-from great_expectations.exceptions import GreatExpectationsError
+
+# Use the absolute path if you need to navigate from the current working directory
+absolute_path = '/opt/airflow/data/validation_results.html'
 
 default_args = {
-    'owner': 'YOUR_NAME',
+    'owner': 'James',
     # 'retries': 5,
     # 'retry_delay': timedelta(minutes=2),
 }
 
-def main_of_zip_data_downloader(params):
+def main_of_zip_data_downloader():
     """Main function for ZIP data downloader."""
     url = 'https://wyszukiwarka.gunb.gov.pl/pliki_pobranie/wynik_zgloszenia_2022_up.zip'
     local_zip_path = 'zip_data.zip'
     extract_to_folder = 'unpacked_zip_data_files'
     download_and_unpack_zip(url, local_zip_path, extract_to_folder)
 
-def main_of_validation(params):
+def main_of_validation():
     csv_file_path = 'unpacked_zip_data_files/wynik_zgloszenia_2022_up.csv'
 
     validate_permissions_data(csv_file_path, absolute_path)
@@ -105,3 +105,4 @@ with DAG(
 
 #Task dependencies
 zip_data_downloader_task >> validation_task >> unzipped_data_uploader_task >> aggregates_creation_task >> send_email_task
+
