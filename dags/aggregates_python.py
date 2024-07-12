@@ -16,23 +16,17 @@ from airflow.operators.python import PythonOperator
 # Use the absolute path if you need to navigate from the current working directory
 absolute_path = '/opt/airflow/data/validation_results.html'
 
+# Other global arguments
+url = 'https://wyszukiwarka.gunb.gov.pl/pliki_pobranie/wynik_zgloszenia_2022_up.zip'
+local_zip_path = 'zip_data.zip'
+extract_to_folder = 'unpacked_zip_data_files'
+csv_file_path = 'unpacked_zip_data_files/wynik_zgloszenia_2022_up.csv'
+
 default_args = {
     'owner': 'James',
     # 'retries': 5,
     # 'retry_delay': timedelta(minutes=2),
 }
-
-def main_of_zip_data_downloader():
-    """Main function for ZIP data downloader."""
-    url = 'https://wyszukiwarka.gunb.gov.pl/pliki_pobranie/wynik_zgloszenia_2022_up.zip'
-    local_zip_path = 'zip_data.zip'
-    extract_to_folder = 'unpacked_zip_data_files'
-    download_and_unpack_zip(url, local_zip_path, extract_to_folder)
-
-def main_of_validation():
-    csv_file_path = 'unpacked_zip_data_files/wynik_zgloszenia_2022_up.csv'
-
-    validate_permissions_data(csv_file_path, absolute_path)
 
 def main_of_unzipped_data_uploader(params, **kwargs):
     # Path to the CSV file containing data to be validated
@@ -68,15 +62,17 @@ with DAG(
     
     zip_data_downloader_task = PythonOperator(
         task_id='zip_data_downloader_task',
-        python_callable=main_of_zip_data_downloader,
+        python_callable=download_and_unpack_zip,
         provide_context=True,
+        op_args=[url, local_zip_path, extract_to_folder],
         dag=dag
     )
 
     validation_task = PythonOperator(
         task_id='validation_task',
-        python_callable=main_of_validation,
+        python_callable=validate_permissions_data,
         provide_context=True,
+        op_args=[csv_file_path, absolute_path],
         dag=dag
     )
     
