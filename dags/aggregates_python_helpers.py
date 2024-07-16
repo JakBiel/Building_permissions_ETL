@@ -18,8 +18,6 @@ from great_expectations.render.renderer import ValidationResultsPageRenderer
 from great_expectations.render.view import DefaultJinjaPageView
 from pandas_gbq import to_gbq
 
-# Use the absolute path if you need to navigate from the current working directory
-absolute_path = '/opt/airflow/data/validation_results.html'
 
 def download_and_unpack_zip(url, local_zip_path, extract_to_folder):
     """Download and unpack a ZIP file."""
@@ -636,7 +634,7 @@ def adding_empty_records_for_powiats_with_zero_permissions(final_aggregate_after
 
 
 
-def email_callback(params):
+def email_callback():
     recipient_email = os.getenv('EMAIL_ADDRESS_2')
     if recipient_email is None:
         raise ValueError("!!! EMAIL_RECIPIENT is not set! The mail cannot be sent !!!")

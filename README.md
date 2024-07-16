@@ -15,6 +15,7 @@
   - [Example of email attachment with Great Expectations validation report](#example-of-email-attachment-with-great-expectations-validation-report)
   - [A data sample from the table "permissions\_results2022"](#a-data-sample-from-the-table-permissions_results2022)
   - [Table schema of "permissions\_results2022" in BigQuery](#table-schema-of-permissions_results2022-in-bigquery)
+  - [A GIF with "pemissions\_results2022" data visualisation](#a-gif-with-pemissions_results2022-data-visualisation)
   - [Contributing](#contributing)
   - [Authors and acknowledgment](#authors-and-acknowledgment)
   - [License](#license)
@@ -44,13 +45,13 @@ The DAG works with the following tasks (in order):
 
 This DAG is scheduled to be executed once per month, on a first day of each month. It does catchups if necessary.
 
-Moreover, for this project, I created visualisations basing on the "permissions_results2022" table in Jupyter Notebook. The visualisations include various plots and GIF file showing the changes in the number of building permissions per last 3, 2 and 1 month (the GIF is below)
-
-![VOIVOD_CHANGES321](img/voivodeships1.gif)
-
-Also, as a part of the project, I created related visualisations in Looker Studio.
+Also, as a part of the project, I created related visualisations in Looker Studio. 
 
 ![LOOKER GIF](img/looker_gif.gif)
+
+To check it directly in Looker Studio, please use the following link:
+
+https://lookerstudio.google.com/reporting/b126ef1e-eac3-484b-a6ce-5c221be64b0f
 
 ## Docker containers runned in this project
 
@@ -164,6 +165,12 @@ lab3
 ## Table schema of "permissions_results2022" in BigQuery
 
 ![DATA_EXMPL2](img/schema_pic.png)
+
+## A GIF with "pemissions_results2022" data visualisation
+
+Moreover, for this project, I created visualisations basing on the "permissions_results2022" table in Jupyter Notebook. The visualisations include various plots and GIF file showing the changes in the number of building permissions per last 3, 2 and 1 month (the GIF is below)
+
+![VOIVOD_CHANGES321](img/voivodeships1.gif)
 
 ## Contributing
 

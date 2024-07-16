@@ -4,7 +4,6 @@ from datetime import datetime, timedelta
 
 import pandas as pd
 from aggregates_python_helpers import (
-    absolute_path,
     download_and_unpack_zip,
     email_callback,
     load_permissions_to_bq,
@@ -12,41 +11,29 @@ from aggregates_python_helpers import (
     validate_permissions_data,
 )
 from airflow import DAG
-from airflow.operators.email import EmailOperator
 from airflow.operators.python import PythonOperator
-from great_expectations.exceptions import GreatExpectationsError
+
+# Use the absolute path if you need to navigate from the current working directory
+absolute_path = '/opt/airflow/data/validation_results.html'
+
+# Other global arguments
+url = 'https://wyszukiwarka.gunb.gov.pl/pliki_pobranie/wynik_zgloszenia_2022_up.zip'
+local_zip_path = 'zip_data.zip'
+extract_to_folder = 'unpacked_zip_data_files'
+csv_file_path = 'unpacked_zip_data_files/wynik_zgloszenia_2022_up.csv'
 
 default_args = {
-    'owner': 'YOUR_NAME',
+    'owner': 'James',
     # 'retries': 5,
     # 'retry_delay': timedelta(minutes=2),
 }
 
-def main_of_zip_data_downloader(params):
-    """Main function for ZIP data downloader."""
-    url = 'https://wyszukiwarka.gunb.gov.pl/pliki_pobranie/wynik_zgloszenia_2022_up.zip'
-    local_zip_path = 'zip_data.zip'
-    extract_to_folder = 'unpacked_zip_data_files'
-    download_and_unpack_zip(url, local_zip_path, extract_to_folder)
-
-def main_of_validation(params):
-    csv_file_path = 'unpacked_zip_data_files/wynik_zgloszenia_2022_up.csv'
-
-    validate_permissions_data(csv_file_path, absolute_path)
-
-def main_of_unzipped_data_uploader(params, **kwargs):
-    # Path to the CSV file containing data to be validated
-    csv_file_path = 'unpacked_zip_data_files/wynik_zgloszenia_2022_up.csv'
-
-    load_permissions_to_bq(csv_file_path, params, **kwargs)
-
-    logging.info("Data upload and validation completed.")
-
-
-def main_of_aggregates_creation(params, **kwargs):
-    """Main function for aggregates creation."""
-
-    superior_aggregates_creator(params, **kwargs)
+global_params = {
+    'dataset_id': "airflow_dataset",
+    'project_id': 'airflow-lab-415614',
+    'table_id_name': 'permissions_results2022',
+    'aggregate_table_name': 'new_aggregate_table'
+}
 
 # DAG definition
 with DAG(
@@ -56,41 +43,43 @@ with DAG(
         start_date=datetime(2023, 3, 2),
         schedule_interval='0 0 1 * *',
         catchup=True,
-        max_active_runs=1,
-        params={
-            'dataset_id': "airflow_dataset",
-            'project_id': 'airflow-lab-415614',
-            'table_id_name': 'permissions_results2022',
-            'aggregate_table_name': 'new_aggregate_table',
-        }
-        
+        max_active_runs=1
 ) as dag:
     
     zip_data_downloader_task = PythonOperator(
         task_id='zip_data_downloader_task',
-        python_callable=main_of_zip_data_downloader,
+        python_callable=download_and_unpack_zip,
         provide_context=True,
+        op_args=[url, local_zip_path, extract_to_folder],
         dag=dag
     )
 
     validation_task = PythonOperator(
         task_id='validation_task',
-        python_callable=main_of_validation,
+        python_callable=validate_permissions_data,
         provide_context=True,
+        op_args=[csv_file_path, absolute_path],
         dag=dag
     )
     
     unzipped_data_uploader_task = PythonOperator(
         task_id='unzipped_data_uploader',
-        python_callable=main_of_unzipped_data_uploader,
+        python_callable=load_permissions_to_bq,
         provide_context=True,
+        op_args=[csv_file_path],
+        op_kwargs={
+            'params': global_params,
+        },
         dag=dag
     )
 
     aggregates_creation_task = PythonOperator(
         task_id='aggregates_creation_task',
-        python_callable=main_of_aggregates_creation,
+        python_callable=superior_aggregates_creator,
         provide_context=True,
+        op_kwargs={
+            'params': global_params,
+        },
         dag=dag,
         execution_timeout=timedelta(minutes=8)
     )
@@ -103,5 +92,5 @@ with DAG(
         dag=dag,
     )
 
-#Task dependencies
+# Task dependencies
 zip_data_downloader_task >> validation_task >> unzipped_data_uploader_task >> aggregates_creation_task >> send_email_task
